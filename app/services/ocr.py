@@ -20,9 +20,8 @@ async def analyze_receipt(file: UploadFile):
         file_bytes = file.read()
     
     # call textract to analyze receipt
-    response = textract.analyze_document(
+    response = textract.analyze_expense(
         Document = {"Bytes": file_bytes},
-        FeatureTypes = ["TABLES", "FORMS"]
     )
     
     os.remove(temp_file_path)
