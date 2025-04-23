@@ -1,7 +1,7 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
-from app.services.ocr import analyze_receipt
-from app.services.receipt_parser import parse_expense
-from app.services.llm import llm_process_receipt
+from app.services.ocr import get_image_data
+from app.services.ocr_llm import ocr_llm_process_receipt
+from app.services.transaction_processor import process_transaction_screenshot
 
 router = APIRouter()
 
@@ -10,33 +10,55 @@ async def analyze_expense_route(file: UploadFile = File(...)):
     """
     Analyze a receipt image and return organized data.
     
-    This endpoint:
-    1. Extracts text from the receipt image
-    2. Parses the text into structured data
-    3. Uses AI to clean up and categorize the items
+    This endpoint uses AI to directly analyze the receipt image and extract:
+    - Vendor name
+    - Date
+    - Total amount
+    - Individual items with quantities and prices
+    - VAT amount (if present)
+    - Overall category
     """
     try:
-        # First, get the text from the receipt image
-        receipt_text = await analyze_receipt(file)
+        # Get the image data
+        image_data = await get_image_data(file)
         
-        # Then, organize the text into a structured format
-        parsed_data = parse_expense(receipt_text)
+        # Process the receipt using AI
+        processed_data = ocr_llm_process_receipt(image_data)
         
-        # Finally, use AI to clean up and categorize everything
-        processed_data = llm_process_receipt(receipt_text)
-        
-        # Return all the data we've collected
-        return {
-            "raw_text": receipt_text,        # The original text from the receipt
-            "parsed_data": parsed_data,      # The initial organized data
-            "processed_data": processed_data  # The cleaned and categorized data
-        }
+        return processed_data
         
     except Exception as e:
         # If something goes wrong, let the user know
         raise HTTPException(
             status_code=500,
             detail=f"Sorry, we couldn't process your receipt: {str(e)}"
+        )
+
+@router.post("/analyze-transaction")
+async def analyze_transaction_route(file: UploadFile = File(...)):
+    """
+    Analyze a bank transaction screenshot and return organized data.
+    
+    This endpoint uses AI to analyze transaction notification screenshots and extract:
+    - Vendor/merchant name
+    - Transaction amount and currency
+    - Transaction date
+    - Business sector
+    """
+    try:
+        # Get the image data
+        image_data = await get_image_data(file)
+        
+        # Process the transaction screenshot
+        processed_data = process_transaction_screenshot(image_data)
+        
+        return processed_data
+        
+    except Exception as e:
+        # If something goes wrong, let the user know
+        raise HTTPException(
+            status_code=500,
+            detail=f"Sorry, we couldn't process your transaction screenshot: {str(e)}"
         )
 
 
