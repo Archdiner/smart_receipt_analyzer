@@ -1,49 +1,84 @@
-# Smart Receipt Analyzer
+# Smart Spend Tracker
 
-AI Powered web app that extracts data from receipts and transaction messages, categorizes spending, and visualizes the data. Built with FastAPI, AWS Textract and Streamlit.
+A comprehensive finance and spending tracker that automates data extraction from receipts and transaction messages, categorizes your spending, and provides insightful visualizations. Built with a FastAPI backend, AWS Textract (or local OCR), and a Streamlit frontend MVP.
 
+## Features
 
+- **Receipt & SMS Upload**  
+  Upload receipt images or SMS screenshots via REST API.
+- **OCR & Parsing**  
+  Extract vendor name, date, total amount (and items if available) using AWS Textract or a local OCR engine.
+- **AI-Powered Categorization**  
+  Assign each transaction to one of 15 predefined spending sectors via a language model.
+- **Interactive Dashboard**  
+  Streamlit-based UI with:
+  - Spending charts by sector and over time
+  - Transaction history table with filters and export options
+  - Manual expense entry form
+- **User Management & Authentication**  
+  Secure sign-up and login (email/password and OAuth providers).
+- **Data Persistence**  
+  PostgreSQL (self-hosted or via Supabase) to store users, transactions, and raw OCR data.
+- **Containerized & Deployable**  
+  Docker setup for consistent local development and cloud deployment.
 
-## Tech Stack:
+## Tech Stack
 
-| Layer       | Technology |
-|------------|------------|
-| Backend     | FastAPI, Uvicorn, Python |
-| OCR         | AWS Textract via boto3 |
-| Frontend (MVP) | Streamlit |
-| Cloud       | AWS (Textract, optional S3) |
-| Containerization | Docker |
-| Data        | JSON (MVP), optional DB (PostgreSQL) |
+| Layer                   | Technology                                  |
+|-------------------------|---------------------------------------------|
+| Backend                 | FastAPI, Uvicorn, Python                    |
+| OCR                     | PaddleOCR       |
+| AI Categorization       | OpenAI GPT-4o-mini
+| Authentication & Database | Supabase (PostgreSQL, Auth, Storage)      |
+| Frontend (MVP)          | Streamlit                                   |
+| Containerization        | Docker, Docker Compose                      |
+| Deployment              | AWS (ECS/Fargate), GCP (Cloud Run), Heroku  |
 
+## Installation & Setup
 
-## Planned features:
+### Prerequisites
 
-- [x] File upload API
-- [ ] AWS Textract integration
-- [ ] Extract vendor, items, totals, date
-- [ ] AI categorization of items
-- [ ] Dashboard UI with Streamlit
-- [ ] Dockerized backend
-- [ ] AWS deployment
+- Docker and Docker Compose
+- AWS account (for Textract and S3) or local OCR alternative
+- Supabase project (optional) for authentication and database
 
+### Clone and Configure
 
-## Final App Workflow:
+```bash
+git clone https://github.com/your-username/smart-spend-tracker.git
+cd smart-spend-tracker
+```
 
-1. User uploads receipt image  
-2. FastAPI backend sends it to AWS Textract  
-3. Extracted data is parsed and returned  
-4. Spending categorized by LLM (Langchain?)
-4. Streamlit shows data as tables/charts
-5. Receipt history
+1. **Environment Variables**: Copy `.env.example` to `.env` and set your credentials:
+   ```dotenv
+   FASTAPI_HOST=0.0.0.0
+   FASTAPI_PORT=8000
+   AWS_ACCESS_KEY_ID=...
+   AWS_SECRET_ACCESS_KEY=...
+   TEXTRACT_REGION=...
+   DATABASE_URL=postgresql://user:pass@host:5432/dbname
+   SUPABASE_URL=https://xyz.supabase.co
+   SUPABASE_KEY=...
+   OPENAI_API_KEY=...
+   ```
 
-## Learning Goals:
+## Usage
 
-- Learn AWS from scratch
-- Master FastAPI and Docker basics
-- Build a real world AI pipeline
-- Understand OCR and data extraction
-- Explore different categorization models
+1. **Register / Login**: Create an account or sign in.
+2. **Dashboard**: View spending charts, recent transactions, and add manual entries.
+3. **Upload Receipts / SMS**: Navigate to the upload page, select an image, analyze, and save.
+4. **History & Export**: Filter transactions by date or sector and download CSV reports.
 
-## Author
-Asad Rizvi: 
-Smart Receipt analyzer is a solo learning project. Feel free to fork it, build on it, or use it for your own personal needs.
+## Roadmap
+
+- **Phase 1 (MVP)**: Core upload and parsing, basic Streamlit dashboard.
+- **Phase 2**: React or Next.js frontend, background processing, budget alerts.
+- **Phase 3**: Native mobile app with offline support and camera integration.
+- **Phase 4**: Advanced analytics (forecasting, trends) and multi-user plans.
+
+## Contributing
+
+Contributions, issues, and feature requests are welcome. Feel free to fork and submit a pull request.
+
+**Happy Tracking!**
+
