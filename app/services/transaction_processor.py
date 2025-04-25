@@ -25,6 +25,8 @@ class TransactionData(BaseModel):
     date: str        # Transaction date
     sector: str      # Business sector
     currency: str    # Transaction currency
+    transaction_type: str = "sms"  # Type of transaction
+    uncertain_category: bool = False   # Flag for uncertain categorization
 
 # Import sectors from existing OCR_LLM service
 from .ocr_llm import SECTORS
@@ -66,11 +68,12 @@ Extract these key details:
 
 2. Total amount (as a number)
 3. Date of transaction (convert to YYYY-MM-DD format)
-4. Currency (e.g., USD, BHD)
+4. Currency (e.g., BHD, USD). If not found, default to BHD
 5. Business sector (MUST be one of: "{sectors_str}")
+6. Uncertain category: Set to true if you're not confident about the sector classification
 
 If you're unsure about the business sector for a vendor, you should:
-1. Note that this is a vendor you need to research
+1. Set uncertain_category to true
 2. Make an educated guess based on the vendor name and transaction details
 3. If you can't determine the sector confidently, use "Miscellaneous"
 
@@ -81,10 +84,10 @@ Respond with ONLY valid JSON in this structure:
     "date": "YYYY-MM-DD",
     "currency": "currency_code",
     "sector": "one of the predefined categories",
-    "needs_research": boolean
+    "uncertain_category": boolean
 }}
 
-Do not include any text outside the JSON. Use ONLY information found in the provided text."""
+Do not include any text outside the JSON. Use ONLY information found in the provided text. If currency is not found, default to "BHD"."""
 
 def process_transaction_screenshot(base64_image: str) -> Dict:
     """

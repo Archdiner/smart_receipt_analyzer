@@ -24,6 +24,9 @@ class ReceiptData(BaseModel):
     date: str        # Purchase date
     total: float     # Total amount
     sector: str      # Overall category for this receipt
+    currency: str    # Transaction currency
+    transaction_type: str = "receipt"  # Type of transaction
+    uncertain_category: bool = False   # Flag for uncertain categorization
 
 # Categories for categorizing receipts
 SECTORS = [
@@ -86,18 +89,23 @@ Extract these key details from the provided text ONLY:
 
 2. Date: Find any date in the text and convert it to YYYY-MM-DD format
 3. Total amount: Identify the final total amount, typically found with indicators like 'Total', 'GROSS', 'NET'
-4. Business sector: Classify the business into exactly one of these categories:
+4. Currency: Identify the currency code (e.g., BHD, USD). If not found, default to BHD
+5. Business sector: Classify the business into exactly one of these categories:
 "{sectors_str}"
+
+6. Uncertain category: Set to true if you're not confident about the sector classification
 
 Respond with ONLY valid JSON in this structure:
 {{
     "vendor": "business_name",
     "date": "YYYY-MM-DD",
     "total": number,
-    "sector": "matching_category"
+    "currency": "currency_code",
+    "sector": "matching_category",
+    "uncertain_category": boolean
 }}
 
-Use ONLY information found in the provided OCR text."""
+Use ONLY information found in the provided OCR text. If currency is not found, default to "BHD"."""
 
 def calculate_token_usage(response) -> Dict:
     """Calculate and return token usage information from the API response."""
