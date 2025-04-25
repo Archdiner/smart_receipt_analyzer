@@ -51,15 +51,14 @@ def display_transaction_data(data):
         st.markdown("#### Basic Information")
         st.write(f"**Vendor:** {data.get('vendor', 'N/A')}")
         st.write(f"**Date:** {data.get('date', 'N/A')}")
-        st.write(f"**Total:** ${data.get('total', 'N/A'):.2f}")
+        st.write(f"**Total:** {data.get('currency', 'BHD')} {data.get('total', 'N/A'):.2f}")
+        st.write(f"**Transaction Type:** {data.get('transaction_type', 'N/A').title()}")
         
     with col2:
         st.markdown("#### Additional Details")
         st.write(f"**Sector:** {data.get('sector', 'N/A')}")
-        if 'currency' in data:
-            st.write(f"**Currency:** {data.get('currency', 'N/A')}")
-        if 'needs_research' in data:
-            st.write(f"**Needs Research:** {'Yes' if data.get('needs_research') else 'No'}")
+        if data.get('uncertain_category', False):
+            st.warning("⚠️ Category classification is uncertain and may need review")
 
 # Set page config
 st.set_page_config(
@@ -191,60 +190,63 @@ def main_app():
             # Display image with fixed height
             st.markdown(f'<img src="data:image/jpeg;base64,{base64.b64encode(img_bytes.getvalue()).decode()}" class="fixed-height-image">', unsafe_allow_html=True)
             
-            # Convert original image to bytes for API
-            img_byte_arr = io.BytesIO()
-            Image.open(uploaded_file).save(img_byte_arr, format='JPEG')
-            
-            # Create files dictionary for multipart form data
-            files = {
-                "file": ("image.jpg", img_byte_arr.getvalue(), "image/jpeg")
-            }
-            
-            # Add authorization header
-            headers = {
-                "Authorization": f"Bearer {st.session_state.access_token}"
-            }
-            
-            # Make API request based on selected mode
-            endpoint = "/analyze-expense" if mode == "Receipt Analysis" else "/analyze-transaction"
-            try:
-                response = requests.post(
-                    f"{API_URL}{endpoint}",
-                    files=files,
-                    headers=headers,
-                    timeout=30
-                )
+            # Add submit button
+            if st.button("Analyze Image"):
+                # Convert original image to bytes for API
+                img_byte_arr = io.BytesIO()
+                Image.open(uploaded_file).save(img_byte_arr, format='JPEG')
                 
-                if response.status_code == 200:
-                    result = response.json()
+                # Create files dictionary for multipart form data
+                files = {
+                    "file": ("image.jpg", img_byte_arr.getvalue(), "image/jpeg")
+                }
+                
+                # Add authorization header
+                headers = {
+                    "Authorization": f"Bearer {st.session_state.access_token}"
+                }
+                
+                # Make API request based on selected mode
+                endpoint = "/analyze-expense" if mode == "Receipt Analysis" else "/analyze-transaction"
+                try:
+                    with st.spinner("Analyzing image..."):
+                        response = requests.post(
+                            f"{API_URL}{endpoint}",
+                            files=files,
+                            headers=headers,
+                            timeout=30
+                        )
                     
-                    # Display results in a nice format
-                    st.markdown("### Analysis Results")
-                    
-                    # Handle multiple transactions for SMS mode
-                    if mode == "SMS Analysis" and isinstance(result.get('parsed_data'), list):
-                        for idx, transaction in enumerate(result['parsed_data']):
-                            st.markdown(f"#### Transaction {idx + 1}")
-                            display_transaction_data(transaction)
+                    if response.status_code == 200:
+                        result = response.json()
+                        
+                        # Display results in a nice format
+                        st.markdown("### Analysis Results")
+                        
+                        # Handle multiple transactions for SMS mode
+                        if mode == "SMS Analysis" and isinstance(result.get('parsed_data'), list):
+                            for idx, transaction in enumerate(result['parsed_data']):
+                                st.markdown(f"#### Transaction {idx + 1}")
+                                display_transaction_data(transaction)
+                        else:
+                            # Single receipt or transaction
+                            display_transaction_data(result.get('parsed_data', {}))
+                        
+                        # Display raw data in expandable section
+                        with st.expander("View Raw Data"):
+                            st.json(result.get('raw_data', {}))
                     else:
-                        # Single receipt or transaction
-                        display_transaction_data(result.get('parsed_data', {}))
+                        error_msg = f"Error: {response.status_code}"
+                        try:
+                            error_detail = response.json()
+                            error_msg += f" - {error_detail.get('detail', 'Unknown error')}"
+                        except:
+                            error_msg += f" - {response.text}"
+                        st.error(error_msg)
+                        
+                except requests.exceptions.RequestException as e:
+                    st.error(f"Failed to connect to the API server: {str(e)}")
                     
-                    # Display raw data in expandable section
-                    with st.expander("View Raw Data"):
-                        st.json(result.get('raw_data', {}))
-                else:
-                    error_msg = f"Error: {response.status_code}"
-                    try:
-                        error_detail = response.json()
-                        error_msg += f" - {error_detail.get('detail', 'Unknown error')}"
-                    except:
-                        error_msg += f" - {response.text}"
-                    st.error(error_msg)
-                    
-            except requests.exceptions.RequestException as e:
-                st.error(f"Failed to connect to the API server: {str(e)}")
-                
         except Exception as e:
             st.error(f"Error processing image: {str(e)}")
 
