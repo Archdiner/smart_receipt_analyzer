@@ -246,5 +246,111 @@ async def get_user_transactions(
             detail=f"Error fetching transactions: {str(e)}"
         )
 
+@router.post("/transactions")
+async def create_transaction(
+    transaction_data: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Create a new transaction directly.
+    
+    Required fields in transaction_data:
+    - vendor: str (vendor name)
+    - date: str (YYYY-MM-DD)
+    - total: float (transaction amount)
+    - sector: str (business sector/category) ***NOTE: LATER ADD AI TO DETERMINE THIS
+    - currency: str (e.g., BHD, USD)
+    
+    Optional fields:
+    - transaction_type: str (defaults to "manual")
+    - uncertain_category: bool (defaults to False) ***NOTE: LATER ADD AI TO DETERMINE THIS
+    """
+    try:
+        # Validate required fields
+        required_fields = ['vendor', 'date', 'total', 'sector', 'currency']
+        missing_fields = [field for field in required_fields if field not in transaction_data]
+        if missing_fields:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Missing required fields: {', '.join(missing_fields)}"
+            )
+        
+        # Store the transaction
+        stored_transaction = await db_service.store_transaction(
+            user_id=current_user['id'],
+            transaction_data=transaction_data
+        )
+        
+        return {
+            "message": "Transaction created successfully",
+            "transaction": stored_transaction
+        }
+        
+    except ValueError as ve:
+        if "Profile not found" in str(ve):
+            raise HTTPException(
+                status_code=404,
+                detail="User profile not found. Please ensure your account is properly set up."
+            )
+        raise HTTPException(
+            status_code=400,
+            detail=str(ve)
+        )
+    except Exception as e:
+        logging.error(f"Error creating transaction: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create transaction: {str(e)}"
+        )
 
+@router.delete("/remove-transaction")
+async def remove_transaction(
+    transaction_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Remove a transaction from the database.
+    
+    Args:
+        transaction_id: The ID of the transaction to remove (as query parameter)
+        current_user: The current authenticated user
+        
+    Returns:
+        dict: Success message and removed transaction details
+    """
+    try:
+        # First verify the transaction belongs to the user
+        response = supabase.table('transactions').select('*').eq('id', transaction_id).eq('user_id', current_user['id']).execute()
+        
+        if not response.data:
+            raise HTTPException(
+                status_code=404,
+                detail="Transaction not found or you don't have permission to delete it"
+            )
+        
+        # Delete the transaction
+        delete_response = supabase.table('transactions').delete().eq('id', transaction_id).execute()
+        
+        if not delete_response.data:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to delete transaction"
+            )
+        
+        return {
+            "message": "Transaction deleted successfully",
+            "transaction_id": transaction_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error deleting transaction: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete transaction: {str(e)}"
+        )
+
+async def update_transaction():
+    ...
 

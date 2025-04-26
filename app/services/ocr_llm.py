@@ -8,6 +8,7 @@ import tempfile
 from PIL import Image
 import io
 import base64
+from .base_processor import BaseProcessor, BaseTransactionData, SECTORS
 
 # Initialize the OpenAI client
 client = OpenAI(
@@ -116,85 +117,33 @@ def calculate_token_usage(response) -> Dict:
         "total_tokens": usage.total_tokens
     }
 
-def ocr_llm_process_receipt(base64_image: str) -> Dict:
-    """
-    Process receipt using OCR first, then LLM for final parsing.
+class ReceiptProcessor(BaseProcessor):
+    """Processor for receipt images."""
     
-    Args:
-        base64_image: Base64 encoded image data
+    def process_receipt(self, base64_image: str) -> dict:
+        """
+        Process a receipt image using OCR and LLM analysis.
         
-    Returns:
-        Dict containing both parsed receipt data and raw outputs
+        Args:
+            base64_image: Base64 encoded image data
+            
+        Returns:
+            Dict containing both parsed receipt data and raw outputs
+            
+        Raises:
+            ValueError: If processing fails
+        """
+        # Use the base processor's process_image method with receipt type
+        result = self.process_image(base64_image, "receipt")
         
-    Raises:
-        ValueError: If something goes wrong with the processing
-    """
-    try:
-        # Convert base64 to image file
-        image_data = base64.b64decode(base64_image)
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as temp_file:
-            temp_file.write(image_data)
-            temp_file_path = temp_file.name
+        # Add receipt-specific data if needed
+        result['parsed_data']['transaction_type'] = "receipt"
+        
+        return result
 
-        try:
-            # Extract text using OCR
-            extracted_text = extract_text_with_ocr(temp_file_path)
-            print("\nExtracted Text:", extracted_text)
-            
-            # Create instructions for the AI
-            prompt = create_processing_prompt(extracted_text)
-            
-            # Ask the AI to process the extracted text
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are analyzing receipt text. Extract only the information present in the provided text. Respond with ONLY valid JSON."
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                temperature=0,
-                response_format={"type": "json_object"}
-            )
-            
-            # Get the raw response for debugging
-            raw_response = response.choices[0].message.content.strip()
-            print("\nAI Response:", raw_response)
-            
-            # Try to parse the response
-            try:
-                cleaned_data = json.loads(raw_response)
-                print("\nParsed JSON:", cleaned_data)
-            except json.JSONDecodeError as e:
-                print(f"\nJSON Parse Error: {str(e)}")
-                print(f"Raw response that failed to parse: {raw_response}")
-                raise ValueError(f"Failed to parse LLM response as JSON: {raw_response}")
-            
-            # Validate the data structure
-            try:
-                receipt_data = ReceiptData(**cleaned_data)
-            except Exception as e:
-                print(f"\nValidation Error: {str(e)}")
-                raise ValueError(f"Invalid receipt data format: {str(e)}")
-            
-            # Return both the structured data and raw outputs
-            return {
-                "parsed_data": receipt_data.dict(),
-                "raw_data": {
-                    "ocr_text": extracted_text,
-                    "llm_response": raw_response
-                }
-            }
-            
-        finally:
-            # Clean up temporary file
-            if os.path.exists(temp_file_path):
-                os.remove(temp_file_path)
-                
-    except Exception as e:
-        print(f"\nGeneral Error: {str(e)}")
-        raise ValueError(f"Failed to process receipt: {str(e)}") 
+# Create a singleton instance
+receipt_processor = ReceiptProcessor()
+
+def ocr_llm_process_receipt(base64_image: str) -> dict:
+    """Wrapper function to maintain backward compatibility."""
+    return receipt_processor.process_receipt(base64_image) 
