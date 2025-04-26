@@ -85,7 +85,8 @@ Respond with ONLY valid JSON in this structure:
     "date": "YYYY-MM-DD",
     "currency": "currency_code",
     "sector": "one of the predefined categories",
-    "uncertain_category": boolean
+    "uncertain_category": boolean,
+    "transaction_type": "sms"
 }}
 
 Do not include any text outside the JSON. Use ONLY information found in the provided text. If currency is not found, default to "BHD"."""
@@ -106,20 +107,33 @@ class TransactionProcessor(BaseProcessor):
         Raises:
             ValueError: If processing fails
         """
-        # Use the base processor's process_image method with transaction type
-        result = self.process_image(base64_image, "transaction")
-        
-        # Add transaction-specific data
-        result['parsed_data']['transaction_type'] = "sms"
-        
-        # Handle multiple transactions if present
-        if isinstance(result['parsed_data'], list):
-            for transaction in result['parsed_data']:
-                transaction['transaction_type'] = "sms"
-        else:
-            result['parsed_data'] = [result['parsed_data']]
-        
-        return result
+        try:
+            # Use the base processor's process_image method with transaction type
+            result = self.process_image(base64_image, "transaction")
+            
+            # Ensure the parsed data has all required fields
+            if 'parsed_data' in result:
+                parsed_data = result['parsed_data']
+                if isinstance(parsed_data, list):
+                    parsed_data = parsed_data[0]  # Take first transaction if multiple
+                
+                # Add transaction type if not present
+                if 'transaction_type' not in parsed_data:
+                    parsed_data['transaction_type'] = 'sms'
+                
+                # Ensure all required fields are present
+                required_fields = ['vendor', 'date', 'total', 'sector', 'currency']
+                missing_fields = [field for field in required_fields if field not in parsed_data]
+                if missing_fields:
+                    raise ValueError(f"Missing required fields in parsed data: {', '.join(missing_fields)}")
+                
+                result['parsed_data'] = parsed_data
+            
+            return result
+            
+        except Exception as e:
+            print(f"Error in process_transaction: {str(e)}")
+            raise
 
 # Create a singleton instance
 transaction_processor = TransactionProcessor()

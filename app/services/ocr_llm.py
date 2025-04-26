@@ -76,7 +76,7 @@ def create_processing_prompt(extracted_text: str) -> str:
     Create a precise instruction prompt for the AI to extract
     vendor, date, total, and sector from raw OCR text.
     """
-    sectors_str = '", "'.join(SECTORS)
+    sectors_str = '\", \"'.join(SECTORS)
     return f"""
 Analyze the following text extracted from a receipt image using OCR:
 
@@ -84,9 +84,11 @@ Analyze the following text extracted from a receipt image using OCR:
 
 Extract these key details from the provided text ONLY:
 1. Vendor/Store name: Identify the primary retail brand or store name by:
-   - Prioritizing main brand names over parent companies or subsidiaries
-   - Checking receipt header, product names, and store identifiers
-   - Formatting for readability (proper case, remove unnecessary text)
+   - Prioritizing the most prominent name or logo at the very top of the receipt, above all other text.
+   - Avoiding names found in the footer, fine print, or after the main list of items (these are often parent companies, operators, or unrelated entities).
+   - If multiple names are present, select the one that is most visually emphasized or appears first in the header section.
+   - Do not use names that are only found in disclaimers, terms, or contact information sections.
+   - Format the vendor name for readability (proper case, remove unnecessary text).
 
 2. Date: Find any date in the text and convert it to YYYY-MM-DD format
 3. Total amount: Identify the final total amount, typically found with indicators like 'Total', 'GROSS', 'NET'
@@ -103,7 +105,8 @@ Respond with ONLY valid JSON in this structure:
     "total": number,
     "currency": "currency_code",
     "sector": "matching_category",
-    "uncertain_category": boolean
+    "uncertain_category": boolean,
+    "transaction_type": "receipt"
 }}
 
 Use ONLY information found in the provided OCR text. If currency is not found, default to "BHD"."""

@@ -200,6 +200,10 @@ Do not include any text outside the JSON. Use ONLY information found in the prov
                     parsed_result = json.loads(result)
                     print("\nParsed JSON:", parsed_result)
                     
+                    # Ensure transaction_type is present
+                    if "transaction_type" not in parsed_result:
+                        parsed_result["transaction_type"] = prompt_type
+
                     # Validate against BaseTransactionData model
                     transaction_data = BaseTransactionData(**parsed_result)
                     

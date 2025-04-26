@@ -102,13 +102,30 @@ class DatabaseService:
     def __init__(self):
         self.vendor_matcher = VendorMatcher()
     
-    async def _get_vendor_id(self, vendor_name: str) -> str:
+    def _set_auth_token(self, access_token: str):
+        """Set the authentication token for Supabase client."""
+        supabase.postgrest.auth(access_token)
+    
+    def _handle_supabase_error(self, e: Exception) -> None:
+        """Handle Supabase-specific errors."""
+        error_msg = str(e)
+        if "42501" in error_msg:  # Permission denied
+            raise ValueError("Permission denied. Please ensure you have the necessary permissions.")
+        elif "23505" in error_msg:  # Unique violation
+            raise ValueError("A record with this information already exists.")
+        elif "23503" in error_msg:  # Foreign key violation
+            raise ValueError("Referenced record does not exist.")
+        else:
+            raise e
+    
+    async def _get_vendor_id(self, vendor_name: str, access_token: str) -> str:
         """
         Get the vendor ID for a given vendor name, creating a new vendor if it doesn't exist.
         Uses fuzzy matching with OpenAI verification for vendor matching.
         
         Args:
             vendor_name (str): The name of the vendor to look up
+            access_token (str): The user's access token for authentication
             
         Returns:
             str: The vendor ID
@@ -117,6 +134,9 @@ class DatabaseService:
             raise ValueError("Vendor name cannot be empty")
             
         try:
+            # Set authentication token
+            self._set_auth_token(access_token)
+            
             # Get all existing vendors
             response = supabase.table('vendors').select('id, name').execute()
             existing_vendors = response.data if response.data else []
@@ -137,19 +157,24 @@ class DatabaseService:
                 'created_at': datetime.utcnow().isoformat()
             }
             
-            response = supabase.table('vendors').insert(new_vendor).execute()
-            if not response.data:
-                raise ValueError("Failed to create new vendor")
-                
-            return response.data[0]['id']
+            try:
+                response = supabase.table('vendors').insert(new_vendor).execute()
+                if not response.data:
+                    raise ValueError("Failed to create new vendor")
+                return response.data[0]['id']
+            except Exception as e:
+                self._handle_supabase_error(e)
             
         except Exception as e:
-            logging.error(f"Error in _get_vendor_id: {str(e)}")
+            print(f"Error in _get_vendor_id: {str(e)}")
             raise
     
-    def get_category_id(self, category_name: str) -> str:
+    def get_category_id(self, category_name: str, access_token: str) -> str:
         """Get category ID from category name."""
         try:
+            # Set authentication token
+            self._set_auth_token(access_token)
+            
             # First try to find exact match
             response = supabase.table('categories').select('id').eq('name', category_name).execute()
             
@@ -170,12 +195,15 @@ class DatabaseService:
             return response.data[0]['id']
             
         except Exception as e:
-            logging.error(f"Error in get_category_id: {str(e)}")
-            raise
+            print(f"Error in get_category_id: {str(e)}")
+            self._handle_supabase_error(e)
     
-    async def store_transaction(self, user_id: str, transaction_data: Dict) -> Dict:
+    async def store_transaction(self, user_id: str, transaction_data: Dict, access_token: str) -> Dict:
         """Store transaction in database with proper relationships."""
         try:
+            # Set authentication token
+            self._set_auth_token(access_token)
+            
             # Validate required fields
             required_fields = ['vendor', 'date', 'total', 'sector', 'currency']
             missing_fields = [field for field in required_fields if field not in transaction_data]
@@ -183,10 +211,10 @@ class DatabaseService:
                 raise ValueError(f"Missing required fields: {', '.join(missing_fields)}")
             
             # Get or create vendor
-            vendor_id = await self._get_vendor_id(transaction_data['vendor'])
+            vendor_id = await self._get_vendor_id(transaction_data['vendor'], access_token)
             
             # Get category ID
-            category_id = self.get_category_id(transaction_data['sector'])
+            category_id = self.get_category_id(transaction_data['sector'], access_token)
             
             # Prepare transaction data
             new_transaction = {
@@ -201,13 +229,15 @@ class DatabaseService:
                 'created_at': datetime.utcnow().isoformat()
             }
             
-            # Insert transaction
-            response = supabase.table('transactions').insert(new_transaction).execute()
-            if not response.data:
-                raise ValueError("Failed to create transaction")
-                
-            return response.data[0]
+            try:
+                # Insert transaction
+                response = supabase.table('transactions').insert(new_transaction).execute()
+                if not response.data:
+                    raise ValueError("Failed to create transaction")
+                return response.data[0]
+            except Exception as e:
+                self._handle_supabase_error(e)
             
         except Exception as e:
-            logging.error(f"Error in store_transaction: {str(e)}")
+            print(f"Error in store_transaction: {str(e)}")
             raise 
