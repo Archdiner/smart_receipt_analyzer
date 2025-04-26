@@ -354,10 +354,11 @@ async def remove_transaction(
             response = supabase.table('transactions').select('*').eq('id', transaction_id).eq('user_id', current_user['id']).execute()
             
             if not response.data:
-                raise HTTPException(
-                    status_code=404,
-                    detail="Transaction not found or you don't have permission to delete it"
-                )
+                # Transaction doesn't exist or doesn't belong to user
+                return {
+                    "message": "Transaction not found or already deleted",
+                    "transaction_id": transaction_id
+                }
             
             # Delete the transaction
             delete_response = supabase.table('transactions').delete().eq('id', transaction_id).execute()
@@ -402,4 +403,49 @@ async def remove_transaction(
 
 async def update_transaction():
     ...
+
+@router.get("/vendors/match")
+async def match_vendor(
+    vendor_name: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Match a vendor name against existing vendors using fuzzy matching.
+    
+    Args:
+        vendor_name: The vendor name to match
+        current_user: The current authenticated user
+        
+    Returns:
+        dict: Matching vendor information if found
+    """
+    try:
+        # Set authentication token
+        supabase.postgrest.auth(current_user['access_token'])
+        
+        # Get all existing vendors
+        response = supabase.table('vendors').select('id, name').execute()
+        existing_vendors = response.data if response.data else []
+        
+        # If we have existing vendors, try to find a match
+        if existing_vendors:
+            matched_vendor = await db_service.vendor_matcher.find_matching_vendor(
+                vendor_name,
+                existing_vendors
+            )
+            
+            if matched_vendor:
+                return {
+                    "matched_vendor": matched_vendor['name'],
+                    "vendor_id": matched_vendor['id']
+                }
+        
+        return {"matched_vendor": None}
+        
+    except Exception as e:
+        print(f"Error in match_vendor: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to match vendor: {str(e)}"
+        )
 

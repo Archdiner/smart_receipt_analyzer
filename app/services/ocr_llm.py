@@ -84,11 +84,15 @@ Analyze the following text extracted from a receipt image using OCR:
 
 Extract these key details from the provided text ONLY:
 1. Vendor/Store name: Identify the primary retail brand or store name by:
-   - Prioritizing the most prominent name or logo at the very top of the receipt, above all other text.
-   - Avoiding names found in the footer, fine print, or after the main list of items (these are often parent companies, operators, or unrelated entities).
-   - If multiple names are present, select the one that is most visually emphasized or appears first in the header section.
-   - Do not use names that are only found in disclaimers, terms, or contact information sections.
-   - Format the vendor name for readability (proper case, remove unnecessary text).
+   - Pay special attention to:
+     * Store IDs and their associated names (e.g., if you see "Store ID:2003", look for a name associated with 2003)
+     * Names that appear in a format like "XXXX-XXX.XX.XX.NAME" (this often indicates a store identifier)
+     * Names that appear multiple times in the header
+     * Names that appear before the product listings
+     * Names that appear in email addresses (e.g., if you see "fi.rackside@stichd.com", "fi" might be related to the store name)
+   - Consider all available information to determine the actual business name
+   - Use real-world knowledge to understand business relationships
+   - Format the name for readability (proper case, remove unnecessary text)
 
 2. Date: Find any date in the text and convert it to YYYY-MM-DD format
 3. Total amount: Identify the final total amount, typically found with indicators like 'Total', 'GROSS', 'NET'

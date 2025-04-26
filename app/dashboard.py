@@ -212,12 +212,11 @@ def display_transaction_history():
                                     headers=headers
                                 )
                                 
-                                if response.status_code == 200:
-                                    st.success("Transaction deleted successfully!")
+                                if response.status_code in [200, 404]:  # Accept both success and not found
+                                    result = response.json()
+                                    st.success(result.get("message", "Transaction deleted successfully!"))
                                     # Clear the confirmation state
                                     st.session_state.delete_confirmation = None
-                                    # Remove the transaction from the DataFrame
-                                    df = df[df['id'] != st.session_state.delete_confirmation]
                                     # Trigger transaction reload
                                     st.session_state.transaction_loading = True
                                     st.rerun()
@@ -447,6 +446,20 @@ def main_app():
                             }
                             
                             with st.spinner("Saving transaction..."):
+                                # First, check for vendor matches
+                                response = requests.get(
+                                    f"{API_URL}/vendors/match",
+                                    params={"vendor_name": vendor},
+                                    headers=headers
+                                )
+                                
+                                if response.status_code == 200:
+                                    match_result = response.json()
+                                    if match_result.get("matched_vendor"):
+                                        st.info(f"Found matching vendor: {match_result['matched_vendor']}")
+                                        transaction_data["vendor"] = match_result["matched_vendor"]
+                                
+                                # Now save the transaction
                                 response = requests.post(
                                     f"{API_URL}/transactions",
                                     json=transaction_data,

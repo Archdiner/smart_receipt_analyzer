@@ -32,10 +32,58 @@ class VendorMatcher:
         normalized = re.sub(r'[^\w\s]', '', vendor.lower().strip())
         # Remove common words that don't affect matching
         stop_words = {'the', 'and', 'or', 'ltd', 'limited', 'inc', 'incorporated'}
-        return ' '.join(word for word in normalized.split() if word not in stop_words)
+        result = ' '.join(word for word in normalized.split() if word not in stop_words)
+        print(f"Normalized vendor name '{vendor}' to '{result}'")
+        return result
+    
+    def calculate_similarity_score(self, new_vendor: str, existing_vendor: str) -> float:
+        """Calculate similarity score using multiple methods."""
+        # Normalize both names
+        norm_new = self.normalize_vendor_name(new_vendor)
+        norm_existing = self.normalize_vendor_name(existing_vendor)
+        
+        # Get individual words
+        new_words = set(norm_new.split())
+        existing_words = set(norm_existing.split())
+        
+        # Calculate similarity scores - only keep the most useful ones
+        token_set_ratio = fuzz.token_set_ratio(norm_new, norm_existing)
+        
+        # Calculate word overlap
+        common_words = new_words.intersection(existing_words)
+        word_overlap = len(common_words) / max(len(new_words), len(existing_words)) * 100
+        
+        # Check for common store name patterns
+        is_store_variation = False
+        store_types = {'market', 'hypermarket', 'supermarket', 'store', 'shop', 'mart'}
+        new_words_no_type = new_words - store_types
+        existing_words_no_type = existing_words - store_types
+        
+        # If the core names match after removing store types, it's likely a variation
+        if new_words_no_type == existing_words_no_type and new_words_no_type:
+            is_store_variation = True
+        
+        # Calculate final score with optimized weights
+        final_score = (
+            token_set_ratio * 0.40 +      # Word order independent similarity (increased)
+            word_overlap * 0.40 +         # Word overlap (increased)
+            (100 if is_store_variation else 0) * 0.20  # Store variation bonus (increased)
+        )
+        
+        print(f"\nSimilarity scores for '{new_vendor}' vs '{existing_vendor}':")
+        print(f"Token set ratio: {token_set_ratio}%")
+        print(f"Word overlap: {word_overlap}%")
+        print(f"Is store variation: {is_store_variation}")
+        print(f"Final score: {final_score}%")
+        
+        return final_score
     
     async def verify_with_openai(self, new_vendor: str, existing_vendor: str) -> bool:
         """Use OpenAI to verify if vendors are similar."""
+        print(f"\nVerifying vendors with OpenAI:")
+        print(f"New vendor: {new_vendor}")
+        print(f"Existing vendor: {existing_vendor}")
+        
         prompt = f"""
         Are these two vendor names referring to the same business?
         Vendor 1: {new_vendor}
@@ -46,6 +94,7 @@ class VendorMatcher:
         - Common abbreviations
         - Branch indicators (e.g., "Lulu Hypermarket" vs "Lulu")
         - Different store types (e.g., "supermarket" vs "hypermarket")
+        - Partial matches (e.g., "Lulu Market" is the same as "Lulu Hypermarket")
         
         Respond with ONLY 'true' or 'false'.
         """
@@ -59,7 +108,9 @@ class VendorMatcher:
                 ],
                 temperature=0
             )
-            return response.choices[0].message.content.strip().lower() == 'true'
+            result = response.choices[0].message.content.strip().lower() == 'true'
+            print(f"OpenAI verification result: {result}")
+            return result
         except Exception as e:
             print(f"OpenAI API error: {str(e)}")
             return False
@@ -69,33 +120,52 @@ class VendorMatcher:
         Find matching vendor using hybrid approach.
         Returns the matching vendor dict if found, None otherwise.
         """
-        normalized_new = self.normalize_vendor_name(new_vendor)
+        print(f"\nFinding match for vendor: {new_vendor}")
+        print(f"Number of existing vendors to check: {len(existing_vendors)}")
+        
+        best_match = None
+        best_score = 0
         
         for vendor in existing_vendors:
-            normalized_existing = self.normalize_vendor_name(vendor['name'])
-            ratio = fuzz.token_sort_ratio(normalized_new, normalized_existing)
+            print(f"\nChecking against existing vendor: {vendor['name']}")
+            score = self.calculate_similarity_score(new_vendor, vendor['name'])
             
-            # Direct match if ratio > 85
-            if ratio > 85:
-                return vendor
+            if score > best_score:
+                best_score = score
+                best_match = vendor
+        
+        if best_match:
+            print(f"\nBest match found: {best_match['name']} with score {best_score}%")
             
-            # OpenAI verification if ratio between 70 and 85
-            if 70 <= ratio <= 85:
-                cache_key = f"{new_vendor}|||{vendor['name']}"
+            # Direct match if score > 80 (increased from 60)
+            if best_score > 80:
+                print(f"Found direct match with score {best_score}%")
+                return best_match
+            
+            # OpenAI verification if score between 65 and 80 (adjusted range)
+            if 65 <= best_score <= 80:
+                print(f"Score {best_score}% is in verification range (65-80)")
+                cache_key = f"{new_vendor}|||{best_match['name']}"
                 
                 # Check cache first
                 if cache_key in self.similarity_cache:
+                    print(f"Found cached result: {self.similarity_cache[cache_key]}")
                     if self.similarity_cache[cache_key]:
-                        return vendor
-                    continue
+                        return best_match
+                    return None
                 
                 # Verify with OpenAI
-                is_similar = await self.verify_with_openai(new_vendor, vendor['name'])
+                print("No cached result, verifying with OpenAI...")
+                is_similar = await self.verify_with_openai(new_vendor, best_match['name'])
                 self.similarity_cache[cache_key] = is_similar
                 
                 if is_similar:
-                    return vendor
+                    print("OpenAI confirmed match")
+                    return best_match
+                else:
+                    print("OpenAI rejected match")
         
+        print("No matching vendor found")
         return None
 
 class DatabaseService:
