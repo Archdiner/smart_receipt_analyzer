@@ -1,10 +1,12 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
 from app.services.supabase_client import supabase
 from typing import Optional
 import logging
 
 router = APIRouter()
+security = HTTPBearer()
 
 class UserRegister(BaseModel):
     email: EmailStr
@@ -15,6 +17,40 @@ class UserRegister(BaseModel):
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """
+    Dependency to get the current authenticated user.
+    To be used with FastAPI's Depends.
+    """
+    try:
+        # Get user from Supabase
+        user_response = supabase.auth.get_user(credentials.credentials)
+        if not user_response or not user_response.user:
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid authentication credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        user = user_response.user
+        # Return a dictionary with the necessary user information
+        return {
+            "id": user.id,
+            "email": user.email,
+            "phone": user.phone,
+            "created_at": user.created_at,
+            "user_metadata": user.user_metadata,
+            "app_metadata": user.app_metadata,
+            "access_token": credentials.credentials
+        }
+    except Exception as e:
+        logging.error(f"Authentication error: {str(e)}")
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 @router.post("/register")
 async def register(user: UserRegister):

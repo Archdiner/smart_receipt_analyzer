@@ -6,6 +6,7 @@ import json
 import base64
 from datetime import datetime
 import time
+import pandas as pd
 
 # API Configuration
 API_URL = "http://localhost:8000/api"
@@ -59,6 +60,152 @@ def display_transaction_data(data):
         st.write(f"**Sector:** {data.get('sector', 'N/A')}")
         if data.get('uncertain_category', False):
             st.warning("⚠️ Category classification is uncertain and may need review")
+
+def load_transactions():
+    """Helper function to load transactions from the API"""
+    try:
+        per_page = 10
+        offset = (st.session_state.get('page_number', 1) - 1) * per_page
+        
+        response = requests.get(
+            f"{API_URL}/transactions",
+            params={
+                "limit": per_page,
+                "offset": offset
+            },
+            headers={"Authorization": f"Bearer {st.session_state.access_token}"}
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            print(f"API Response: {json.dumps(data, indent=2)}")  # Debug log
+            st.session_state.transaction_data = data
+            st.session_state.transaction_error = None
+        elif response.status_code == 401:
+            st.session_state.transaction_error = "Session expired. Please log in again."
+            st.session_state.logged_in = False
+            st.session_state.user = None
+            st.session_state.access_token = None
+            st.rerun()
+        else:
+            error_msg = "Failed to fetch transactions."
+            try:
+                error_detail = response.json()
+                error_msg = error_detail.get('detail', error_msg)
+            except:
+                pass
+            st.session_state.transaction_error = f"{error_msg} Please try again later."
+            print(f"Error Response: {response.text}")  # Debug log
+    except Exception as e:
+        st.session_state.transaction_error = f"Error loading transactions: {str(e)}"
+        print(f"Exception: {str(e)}")  # Debug log
+    finally:
+        st.session_state.transaction_loading = False
+
+def display_transaction_history():
+    """Display transaction history in a table format"""
+    st.markdown("### Transaction History")
+    
+    # Show loading state
+    if st.session_state.transaction_loading:
+        st.info("Loading transactions...")
+        
+    # Add refresh button at the top
+    if st.button("🔄 Refresh Transactions"):
+        st.session_state.transaction_loading = True
+        load_transactions()
+        st.rerun()
+    
+    # Load transactions if needed
+    if not st.session_state.transaction_data or st.session_state.transaction_loading:
+        with st.spinner("Fetching your transactions..."):
+            load_transactions()
+    
+    # Show any errors
+    if st.session_state.transaction_error:
+        st.error(st.session_state.transaction_error)
+        return
+    
+    # Process the data
+    data = st.session_state.transaction_data
+    if not data:
+        st.warning("No transaction data available. Try refreshing.")
+        return
+        
+    transactions = data.get('transactions', [])
+    total_transactions = data.get('total', 0)
+    
+    # Show transaction count
+    st.write(f"Found {total_transactions} total transactions")
+    
+    if transactions:
+        try:
+            # Create DataFrame for display
+            df = pd.DataFrame(transactions)
+            
+            # Show raw data in expander for debugging
+            with st.expander("Debug: Raw Transaction Data"):
+                st.json(transactions)
+            
+            # Convert date strings to datetime for better display
+            df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')
+            
+            # Format currency and amount
+            df['formatted_amount'] = df.apply(
+                lambda x: f"{x['currency']} {x['total_amount']:.2f}", 
+                axis=1
+            )
+            
+            # Select and rename columns for display
+            display_df = df[[
+                'date',
+                'vendor_name',
+                'formatted_amount',
+                'category_name'
+            ]].rename(columns={
+                'vendor_name': 'Vendor',
+                'formatted_amount': 'Amount',
+                'category_name': 'Category',
+                'date': 'Date'
+            })
+            
+            # Display the table
+            st.dataframe(
+                display_df,
+                hide_index=True,
+                use_container_width=True
+            )
+            
+            # Pagination controls
+            per_page = 10
+            total_pages = max(1, (total_transactions + per_page - 1) // per_page)
+            current_page = st.session_state.get('page_number', 1)
+            
+            col1, col2, col3 = st.columns([1, 2, 1])
+            
+            with col1:
+                if current_page > 1:
+                    if st.button("← Previous"):
+                        st.session_state.page_number = current_page - 1
+                        st.session_state.transaction_loading = True
+                        st.rerun()
+            
+            with col2:
+                st.markdown(f"<div style='text-align: center'>Page {current_page} of {total_pages}</div>", unsafe_allow_html=True)
+            
+            with col3:
+                if current_page < total_pages:
+                    if st.button("Next →"):
+                        st.session_state.page_number = current_page + 1
+                        st.session_state.transaction_loading = True
+                        st.rerun()
+        
+        except Exception as e:
+            st.error(f"Error displaying transactions: {str(e)}")
+            st.write("Debug information:")
+            st.json(transactions)
+    else:
+        st.info("No transactions found. Start by analyzing some receipts or transaction screenshots!")
 
 # Set page config
 st.set_page_config(
@@ -159,96 +306,118 @@ def main_app():
         st.session_state.access_token = None
         st.rerun()
     
-    st.markdown("Upload a receipt image or SMS message for analysis")
+    # Initialize transaction data in session state if not exists
+    if 'transaction_data' not in st.session_state:
+        st.session_state.transaction_data = None
+        st.session_state.transaction_loading = False
+        st.session_state.transaction_error = None
+        st.session_state.page_number = 1
+    
+    # Create tabs for analysis and history
+    tab1, tab2 = st.tabs(["Receipt Analysis", "Transaction History"])
+    
+    with tab1:
+        st.markdown("Upload a receipt image or SMS message for analysis")
 
-    # Mode toggle
-    mode = st.radio(
-        "Select Analysis Mode",
-        ["Receipt Analysis", "SMS Analysis"],
-        horizontal=True
-    )
+        # Mode toggle
+        mode = st.radio(
+            "Select Analysis Mode",
+            ["Receipt Analysis", "SMS Analysis"],
+            horizontal=True
+        )
 
-    # File uploader
-    uploaded_file = st.file_uploader("Choose an image file", type=["jpg", "jpeg", "png"])
+        # File uploader
+        uploaded_file = st.file_uploader("Choose an image file", type=["jpg", "jpeg", "png"])
 
-    if uploaded_file is not None:
-        try:
-            # Display the uploaded image
-            image = Image.open(uploaded_file)
-            
-            # Resize image while maintaining aspect ratio
-            max_height = 400
-            aspect_ratio = image.width / image.height
-            new_height = min(max_height, image.height)
-            new_width = int(new_height * aspect_ratio)
-            image = image.resize((new_width, int(new_height)), Image.Resampling.LANCZOS)
-            
-            # Convert to bytes for display
-            img_bytes = io.BytesIO()
-            image.save(img_bytes, format=image.format if image.format else 'JPEG')
-            
-            # Display image with fixed height
-            st.markdown(f'<img src="data:image/jpeg;base64,{base64.b64encode(img_bytes.getvalue()).decode()}" class="fixed-height-image">', unsafe_allow_html=True)
-            
-            # Add submit button
-            if st.button("Analyze Image"):
-                # Convert original image to bytes for API
-                img_byte_arr = io.BytesIO()
-                Image.open(uploaded_file).save(img_byte_arr, format='JPEG')
+        if uploaded_file is not None:
+            try:
+                # Display the uploaded image
+                image = Image.open(uploaded_file)
                 
-                # Create files dictionary for multipart form data
-                files = {
-                    "file": ("image.jpg", img_byte_arr.getvalue(), "image/jpeg")
-                }
+                # Resize image while maintaining aspect ratio
+                max_height = 400
+                aspect_ratio = image.width / image.height
+                new_height = min(max_height, image.height)
+                new_width = int(new_height * aspect_ratio)
+                image = image.resize((new_width, int(new_height)), Image.Resampling.LANCZOS)
                 
-                # Add authorization header
-                headers = {
-                    "Authorization": f"Bearer {st.session_state.access_token}"
-                }
+                # Convert to bytes for display
+                img_bytes = io.BytesIO()
+                image.save(img_bytes, format=image.format if image.format else 'JPEG')
                 
-                # Make API request based on selected mode
-                endpoint = "/analyze-expense" if mode == "Receipt Analysis" else "/analyze-transaction"
-                try:
-                    with st.spinner("Analyzing image..."):
-                        response = requests.post(
-                            f"{API_URL}{endpoint}",
-                            files=files,
-                            headers=headers,
-                            timeout=30
-                        )
+                # Display image with fixed height
+                st.markdown(f'<img src="data:image/jpeg;base64,{base64.b64encode(img_bytes.getvalue()).decode()}" class="fixed-height-image">', unsafe_allow_html=True)
+                
+                # Add submit button
+                if st.button("Analyze Image"):
+                    # Convert original image to bytes for API
+                    img_byte_arr = io.BytesIO()
+                    Image.open(uploaded_file).save(img_byte_arr, format='JPEG')
                     
-                    if response.status_code == 200:
-                        result = response.json()
+                    # Create files dictionary for multipart form data
+                    files = {
+                        "file": ("image.jpg", img_byte_arr.getvalue(), "image/jpeg")
+                    }
+                    
+                    # Add authorization header
+                    headers = {
+                        "Authorization": f"Bearer {st.session_state.access_token}"
+                    }
+                    
+                    # Make API request based on selected mode
+                    endpoint = "/analyze-expense" if mode == "Receipt Analysis" else "/analyze-transaction"
+                    try:
+                        with st.spinner("Analyzing image..."):
+                            response = requests.post(
+                                f"{API_URL}{endpoint}",
+                                files=files,
+                                headers=headers,
+                                timeout=30
+                            )
                         
-                        # Display results in a nice format
-                        st.markdown("### Analysis Results")
-                        
-                        # Handle multiple transactions for SMS mode
-                        if mode == "SMS Analysis" and isinstance(result.get('parsed_data'), list):
-                            for idx, transaction in enumerate(result['parsed_data']):
-                                st.markdown(f"#### Transaction {idx + 1}")
-                                display_transaction_data(transaction)
+                        if response.status_code == 200:
+                            result = response.json()
+                            
+                            # Display success message with link to history
+                            st.success("✅ Analysis complete! Transaction saved successfully.")
+                            st.markdown("View this transaction in your [transaction history](#transaction-history).")
+                            
+                            # Display results in a nice format
+                            st.markdown("### Analysis Results")
+                            
+                            # Handle multiple transactions for SMS mode
+                            if mode == "SMS Analysis" and isinstance(result.get('parsed_data'), list):
+                                for idx, transaction in enumerate(result['parsed_data']):
+                                    st.markdown(f"#### Transaction {idx + 1}")
+                                    display_transaction_data(transaction)
+                            else:
+                                # Single receipt or transaction
+                                display_transaction_data(result.get('parsed_data', {}))
+                            
+                            # Display raw data in expandable section
+                            with st.expander("View Raw Data"):
+                                st.json(result.get('raw_data', {}))
+                            
+                            # Trigger transaction reload
+                            st.session_state.transaction_loading = True
+                            load_transactions()
                         else:
-                            # Single receipt or transaction
-                            display_transaction_data(result.get('parsed_data', {}))
-                        
-                        # Display raw data in expandable section
-                        with st.expander("View Raw Data"):
-                            st.json(result.get('raw_data', {}))
-                    else:
-                        error_msg = f"Error: {response.status_code}"
-                        try:
-                            error_detail = response.json()
-                            error_msg += f" - {error_detail.get('detail', 'Unknown error')}"
-                        except:
-                            error_msg += f" - {response.text}"
-                        st.error(error_msg)
-                        
-                except requests.exceptions.RequestException as e:
-                    st.error(f"Failed to connect to the API server: {str(e)}")
+                            error_msg = f"Error: {response.status_code}"
+                            try:
+                                error_detail = response.json()
+                                error_msg += f" - {error_detail.get('detail', 'Unknown error')}"
+                            except:
+                                error_msg += f" - {response.text}"
+                            st.error(error_msg)
+                            
+                    except requests.exceptions.RequestException as e:
+                        st.error(f"Failed to connect to the API server: {str(e)}")
                     
-        except Exception as e:
-            st.error(f"Error processing image: {str(e)}")
+            except Exception as e:
+                st.error(f"Error processing image: {str(e)}")
+    
+    with tab2:
+        display_transaction_history()
 
 # Main flow control
 if not st.session_state.logged_in:
