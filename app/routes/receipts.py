@@ -401,8 +401,82 @@ async def remove_transaction(
             detail=f"Failed to delete transaction: {str(e)}"
         )
 
-async def update_transaction():
-    ...
+@router.put("/update-transaction/{transaction_id}")
+async def update_transaction(
+    transaction_id: str,
+    update_data: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Update a transaction with partial updates.
+    
+    Args:
+        transaction_id: The ID of the transaction to update
+        update_data: Dictionary containing fields to update (vendor, date, currency, sector, total_amount)
+        current_user: The current authenticated user
+        
+    Returns:
+        dict: Updated transaction details
+    """
+    try:
+        # Set authentication token
+        supabase.postgrest.auth(current_user['access_token'])
+        
+        # First verify the transaction belongs to the user and get current data
+        response = supabase.table('transactions').select('*').eq('id', transaction_id).eq('user_id', current_user['id']).execute()
+        
+        if not response.data:
+            raise HTTPException(
+                status_code=404,
+                detail="Transaction not found or doesn't belong to user"
+            )
+        
+        current_transaction = response.data[0]
+        
+        # If vendor is being updated, check for matches
+        if 'vendor' in update_data and update_data['vendor'] is not None:
+            vendor_match_response = await match_vendor(update_data['vendor'], current_user)
+            if vendor_match_response.get('matched_vendor'):
+                update_data['vendor'] = vendor_match_response['matched_vendor']
+        
+        # Prepare update data, only including fields that are not None
+        update_fields = {}
+        allowed_fields = ['vendor', 'date', 'currency', 'sector', 'total_amount']
+        
+        for field in allowed_fields:
+            if field in update_data and update_data[field] is not None:
+                update_fields[field] = update_data[field]
+            else:
+                # If field is not provided or is None, keep the existing value
+                update_fields[field] = current_transaction.get(field)
+        
+        # Update the transaction
+        update_response = (
+            supabase.table('transactions')
+            .update(update_fields)
+            .eq('id', transaction_id)
+            .execute()
+        )
+        
+        if not update_response.data:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to update transaction"
+            )
+        
+        return {
+            "message": "Transaction updated successfully",
+            "transaction": update_response.data[0]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error updating transaction: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to update transaction: {str(e)}"
+        )
 
 @router.get("/vendors/match")
 async def match_vendor(
