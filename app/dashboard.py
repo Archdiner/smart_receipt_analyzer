@@ -103,7 +103,7 @@ def load_transactions():
         st.session_state.transaction_loading = False
 
 def display_transaction_history():
-    """Display transaction history in a table format"""
+    """Display transaction history in a card-based layout"""
     st.markdown("### Transaction History")
     
     # Show loading state
@@ -144,55 +144,180 @@ def display_transaction_history():
     if 'editing_row_data' not in st.session_state:
         st.session_state.editing_row_data = None
     
+    # Initialize session state for delete confirmation if not exists
+    if 'delete_confirmation' not in st.session_state:
+        st.session_state.delete_confirmation = None
+        
     if transactions:
         try:
             # Create DataFrame for display
             df = pd.DataFrame(transactions)
+            
             # Show raw data in expander for debugging
             with st.expander("Debug: Raw Transaction Data"):
                 st.json(transactions)
+                
             # Convert date strings to datetime for better display
             df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')
+            
             # Format currency and amount
             df['formatted_amount'] = df.apply(
                 lambda x: f"{x['currency']} {x['total_amount']:.2f}", 
                 axis=1
             )
-            # Initialize session state for delete confirmation if not exists
-            if 'delete_confirmation' not in st.session_state:
-                st.session_state.delete_confirmation = None
-            # Create columns for the table and action buttons
-            col1, col2 = st.columns([10, 1])
-            with col1:
-                # Select and rename columns for display
-                display_df = df[[
-                    'date',
-                    'vendor_name',
-                    'formatted_amount',
-                    'category_name'
-                ]].rename(columns={
-                    'vendor_name': 'Vendor',
-                    'formatted_amount': 'Amount',
-                    'category_name': 'Category',
-                    'date': 'Date'
-                })
-                # Display the table
-                st.dataframe(
-                    display_df,
-                    hide_index=True,
-                    use_container_width=True
-                )
-            with col2:
-                # Display delete and edit buttons aligned with table rows
-                for idx, row in df.iterrows():
-                    delete_button = st.button("🗑️", key=f"delete_{row['id']}")
-                    edit_button = st.button("✏️ Edit", key=f"edit_{row['id']}")
-                    if delete_button:
-                        st.session_state.delete_confirmation = row['id']
-                    if edit_button:
-                        st.session_state.editing_transaction_id = row['id']
-                        st.session_state.editing_row_data = row
-            # Handle delete confirmation (unchanged)
+            
+            # Display cards in a grid layout
+            st.markdown('<div class="card-grid">', unsafe_allow_html=True)
+            
+            # Create a card for each transaction
+            for idx, row in df.iterrows():
+                # Check if this card is being edited
+                is_editing = st.session_state.editing_transaction_id == row['id']
+                
+                if not is_editing:
+                    # Card container with custom HTML
+                    card_html = f"""
+                        <div class="transaction-card">
+                            <div class="card-header">
+                                <span class="card-label">Vendor:</span> 
+                                <span class="vendor-name">{row['vendor_name'] or 'Unknown'}</span>
+                            </div>
+                            <div class="card-body">
+                                <div class="card-info">
+                                    <span class="card-label">Date:</span> 
+                                    <span class="date-value">{row['date']}</span>
+                                </div>
+                                <div class="card-info">
+                                    <span class="card-amount">{row['formatted_amount']}</span>
+                                </div>
+                                <div class="card-info">
+                                    <span class="card-category">{row['category_name'] or 'Uncategorized'}</span>
+                                </div>
+                            </div>
+                        </div>
+                    """
+                    st.markdown(card_html, unsafe_allow_html=True)
+                    
+                    # Card actions (buttons) - place in columns for better alignment
+                    cols = st.columns([1, 1, 2])  # Adjust column widths for better layout
+                    with cols[0]:
+                        if st.button("✏️ Edit", key=f"edit_{row['id']}"):
+                            st.session_state.editing_transaction_id = row['id']
+                            st.session_state.editing_row_data = row
+                            st.rerun()  # Rerun to show edit form
+                    
+                    with cols[1]:
+                        if st.button("🗑️ Delete", key=f"delete_{row['id']}"):
+                            st.session_state.delete_confirmation = row['id']
+                else:
+                    # Display edit form within this card
+                    with st.container():
+                        st.markdown("""
+                        <div class="transaction-card editing-card">
+                            <div class="card-header">
+                                <span class="card-label">Edit Transaction</span>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        # Fetch categories for dropdown
+                        try:
+                            headers = {"Authorization": f"Bearer {st.session_state.access_token}"}
+                            categories_response = requests.get(f"{API_URL}/categories", headers=headers)
+                            categories = categories_response.json() if categories_response.status_code == 200 else []
+                        except Exception as e:
+                            categories = []
+                        
+                        category_options = {cat['name']: cat['id'] for cat in categories}
+                        current_category = row.get('category_name', '')
+                        current_category_id = next((cat['id'] for cat in categories if cat['name'] == current_category), None)
+                        
+                        # Create edit form within this card
+                        with st.form(f"edit_transaction_form_{row['id']}"):
+                            new_vendor = st.text_input("Vendor", value=row['vendor_name'] or '')
+                            new_date = st.date_input("Date", value=pd.to_datetime(row['date']))
+                            new_currency = st.text_input("Currency", value=row['currency'] or '')
+                            new_total = st.number_input("Total Amount", value=row['total_amount'])
+                            
+                            # Handle category selection with a default option
+                            category_index = 0
+                            if current_category in category_options:
+                                category_index = list(category_options.keys()).index(current_category)
+                            
+                            new_category = st.selectbox(
+                                "Category", 
+                                options=list(category_options.keys()), 
+                                index=category_index
+                            )
+                            
+                            # Form buttons
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                submitted = st.form_submit_button("Save Changes")
+                            with col2:
+                                cancelled = st.form_submit_button("Cancel")
+                            
+                            if submitted:
+                                # First get vendor_id if needed
+                                vendor_id = None
+                                if new_vendor:
+                                    try:
+                                        # Check for vendor match
+                                        vendor_match_response = requests.get(
+                                            f"{API_URL}/vendors/match",
+                                            params={"vendor_name": new_vendor},
+                                            headers={"Authorization": f"Bearer {st.session_state.access_token}"}
+                                        )
+                                        
+                                        if vendor_match_response.status_code == 200:
+                                            match_result = vendor_match_response.json()
+                                            if match_result.get("vendor_id"):
+                                                vendor_id = match_result["vendor_id"]
+                                    except Exception as e:
+                                        st.error(f"Error matching vendor: {str(e)}")
+                                
+                                # If no vendor_id found through match, use the original one
+                                if not vendor_id:
+                                    vendor_id = row.get('vendor_id')
+                                    
+                                # Build the update payload with only the needed fields
+                                update_data = {
+                                    "vendor_id": vendor_id,
+                                    "date": new_date.strftime("%Y-%m-%d"),
+                                    "currency": new_currency,
+                                    "total_amount": float(new_total),
+                                    "category_id": category_options[new_category]
+                                }
+                                
+                                # Send the update request
+                                with st.spinner("Updating transaction..."):
+                                    headers = {"Authorization": f"Bearer {st.session_state.access_token}"}
+                                    response = requests.put(
+                                        f"{API_URL}/update-transaction/{row['id']}",
+                                        json=update_data,
+                                        headers=headers
+                                    )
+                                    
+                                    if response.status_code == 200:
+                                        st.success("Transaction updated successfully!")
+                                        st.session_state.editing_transaction_id = None
+                                        st.session_state.transaction_loading = True
+                                        load_transactions()
+                                        st.rerun()
+                                    else:
+                                        st.error("Failed to update transaction. Please try again.")
+                            
+                            if cancelled:
+                                st.session_state.editing_transaction_id = None
+                                st.rerun()
+                
+                # Add spacer between cards for better visual separation
+                st.markdown("<div style='margin-bottom: 10px;'></div>", unsafe_allow_html=True)
+            
+            # Close the card grid div
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            # Handle delete confirmation
             if st.session_state.delete_confirmation:
                 with st.container():
                     st.warning("Are you sure you want to delete this transaction?")
@@ -221,83 +346,8 @@ def display_transaction_history():
                         if st.button("No, cancel", key="cancel_delete"):
                             st.session_state.delete_confirmation = None
                             st.rerun()
-            # Edit form below the table
-            if st.session_state.editing_transaction_id:
-                row = st.session_state.editing_row_data
-                # Fetch categories for dropdown
-                try:
-                    headers = {"Authorization": f"Bearer {st.session_state.access_token}"}
-                    categories_response = requests.get(f"{API_URL}/categories", headers=headers)
-                    categories = categories_response.json() if categories_response.status_code == 200 else []
-                except Exception as e:
-                    categories = []
-                category_options = {cat['name']: cat['id'] for cat in categories}
-                current_category = row.get('category_name', '')
-                current_category_id = next((cat['id'] for cat in categories if cat['name'] == current_category), None)
-                st.markdown("---")
-                st.subheader("Edit Transaction")
-                with st.form("edit_transaction_form"):
-                    new_vendor = st.text_input("Vendor", value=row['vendor_name'] or '')
-                    new_date = st.date_input("Date", value=pd.to_datetime(row['date']))
-                    new_currency = st.text_input("Currency", value=row['currency'] or '')
-                    new_total = st.number_input("Total Amount", value=row['total_amount'])
-                    new_category = st.selectbox("Category", options=list(category_options.keys()), index=list(category_options.keys()).index(current_category) if current_category in category_options else 0)
-                    submitted = st.form_submit_button("Save Changes")
-                    cancelled = st.form_submit_button("Cancel")
-                    if submitted:
-                        # First get vendor_id if needed
-                        vendor_id = None
-                        if new_vendor:
-                            try:
-                                # Check for vendor match
-                                vendor_match_response = requests.get(
-                                    f"{API_URL}/vendors/match",
-                                    params={"vendor_name": new_vendor},
-                                    headers={"Authorization": f"Bearer {st.session_state.access_token}"}
-                                )
-                                
-                                if vendor_match_response.status_code == 200:
-                                    match_result = vendor_match_response.json()
-                                    if match_result.get("vendor_id"):
-                                        vendor_id = match_result["vendor_id"]
-                            except Exception as e:
-                                st.error(f"Error matching vendor: {str(e)}")
-                        
-                        # If no vendor_id found through match, use the original one
-                        if not vendor_id:
-                            vendor_id = row.get('vendor_id')
                             
-                        # Build the update payload with only the needed fields
-                        update_data = {
-                            "vendor_id": vendor_id,
-                            "date": new_date.strftime("%Y-%m-%d"),
-                            "currency": new_currency,
-                            "total_amount": float(new_total),
-                            "category_id": category_options[new_category]
-                        }
-                        
-                        # Send the update request
-                        with st.spinner("Updating transaction..."):
-                            headers = {"Authorization": f"Bearer {st.session_state.access_token}"}
-                            response = requests.put(
-                                f"{API_URL}/update-transaction/{row['id']}",
-                                json=update_data,
-                                headers=headers
-                            )
-                            
-                            if response.status_code == 200:
-                                st.success("Transaction updated successfully!")
-                                st.session_state.editing_transaction_id = None
-                                st.session_state.transaction_loading = True
-                                load_transactions()
-                                st.rerun()
-                            else:
-                                st.error("Failed to update transaction. Please try again.")
-                    
-                    if cancelled:
-                        st.session_state.editing_transaction_id = None
-                        st.rerun()
-            # Pagination controls (unchanged)
+            # Pagination controls
             per_page = 10
             total_pages = max(1, (total_transactions + per_page - 1) // per_page)
             current_page = st.session_state.get('page_number', 1)
@@ -346,6 +396,98 @@ st.markdown("""
         }
         .stButton>button {
             width: 100%;
+        }
+        /* Transaction card styles */
+        .transaction-card {
+            background-color: #ffffff;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 15px;
+            border: 1px solid #e0e0e0;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            transition: all 0.2s ease;
+            color: #222222; /* Darker base text color for better contrast */
+        }
+        .transaction-card:hover {
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            transform: translateY(-2px);
+        }
+        .card-header {
+            border-bottom: 1px solid #f0f0f0;
+            padding-bottom: 12px;
+            margin-bottom: 12px;
+            font-size: 1.1rem;
+            color: #222222;
+            font-weight: 500;
+        }
+        .card-body {
+            padding: 5px 0;
+            color: #222222;
+        }
+        .card-info {
+            margin-bottom: 8px;
+            color: #222222;
+        }
+        .card-label {
+            font-weight: 600;
+            color: #222222;
+            margin-right: 5px;
+            font-size: 0.9rem;
+        }
+        .vendor-name {
+            color: #0d47a1;
+            font-weight: 500;
+            font-size: 1.1rem;
+        }
+        .date-value {
+            color: #222222;
+            font-weight: 500;
+        }
+        .card-amount {
+            font-size: 1.4rem;
+            font-weight: 700;
+            color: #2e7d32;
+            display: block;
+            margin: 10px 0;
+        }
+        .card-category {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 20px;
+            background-color: #f1f8e9;
+            color: #558b2f;
+            font-size: 0.85rem;
+            margin-top: 8px;
+            font-weight: 500;
+        }
+        .card-actions {
+            margin-top: 15px;
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+        .card-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        /* Editing card styles */
+        .editing-card {
+            background-color: #f0f7ff;
+            border: 2px solid #2196f3;
+            box-shadow: 0 4px 8px rgba(33, 150, 243, 0.2);
+        }
+        .stForm {
+            background-color: #f0f7ff;
+            padding: 10px;
+            border-radius: 10px;
+        }
+        /* Make form buttons more visible */
+        .stForm [data-testid="stFormSubmitButton"] button {
+            background-color: #2196f3;
+            color: white;
+            font-weight: bold;
         }
     </style>
 """, unsafe_allow_html=True)
