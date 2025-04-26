@@ -409,16 +409,16 @@ async def update_transaction(
 ):
     """
     Update a transaction with partial updates.
-    
     Args:
         transaction_id: The ID of the transaction to update
-        update_data: Dictionary containing fields to update (vendor, date, currency, sector, total_amount)
+        update_data: Dictionary containing fields to update (vendor_id, date, currency, category_id, total_amount)
         current_user: The current authenticated user
-        
     Returns:
         dict: Updated transaction details
     """
     try:
+        print(f"Starting update for transaction {transaction_id}")
+        
         # Set authentication token
         supabase.postgrest.auth(current_user['access_token'])
         
@@ -426,6 +426,7 @@ async def update_transaction(
         response = supabase.table('transactions').select('*').eq('id', transaction_id).eq('user_id', current_user['id']).execute()
         
         if not response.data:
+            print(f"Transaction {transaction_id} not found or doesn't belong to user {current_user['id']}")
             raise HTTPException(
                 status_code=404,
                 detail="Transaction not found or doesn't belong to user"
@@ -435,47 +436,62 @@ async def update_transaction(
         
         # If vendor is being updated, check for matches
         if 'vendor' in update_data and update_data['vendor'] is not None:
+            print(f"Checking for vendor match: {update_data['vendor']}")
             vendor_match_response = await match_vendor(update_data['vendor'], current_user)
-            if vendor_match_response.get('matched_vendor'):
-                update_data['vendor'] = vendor_match_response['matched_vendor']
+            
+            if vendor_match_response.get('vendor_id'):
+                update_data['vendor_id'] = vendor_match_response['vendor_id']
+                print(f"Set vendor_id to: {update_data['vendor_id']}")
         
-        # Prepare update data, only including fields that are not None
-        update_fields = {}
-        allowed_fields = ['vendor', 'date', 'currency', 'sector', 'total_amount']
+        # Extract fields that can be updated
+        updated_fields = {}
+        allowed_fields = ['vendor_id', 'date', 'currency', 'category_id', 'total_amount']
         
+        # Check which fields to update
         for field in allowed_fields:
             if field in update_data and update_data[field] is not None:
-                update_fields[field] = update_data[field]
-            else:
-                # If field is not provided or is None, keep the existing value
-                update_fields[field] = current_transaction.get(field)
+                updated_fields[field] = update_data[field]
+                print(f"Will update {field}: {update_data[field]}")
         
-        # Update the transaction
+        # Ensure numeric values
+        if 'total_amount' in updated_fields:
+            updated_fields['total_amount'] = float(updated_fields['total_amount'])
+        
+        if not updated_fields:
+            return {
+                "message": "No fields to update",
+                "transaction": current_transaction
+            }
+        
+        # Execute the actual update
         update_response = (
             supabase.table('transactions')
-            .update(update_fields)
+            .update(updated_fields)
             .eq('id', transaction_id)
             .execute()
         )
         
-        if not update_response.data:
+        if update_response.data:
+            print(f"Update successful: {json.dumps(update_response.data[0], default=json_serial)}")
+            return {
+                "message": "Transaction updated successfully",
+                "transaction": update_response.data[0]
+            }
+        else:
             raise HTTPException(
                 status_code=500,
-                detail="Failed to update transaction"
+                detail="Failed to update transaction: No data returned"
             )
-        
-        return {
-            "message": "Transaction updated successfully",
-            "transaction": update_response.data[0]
-        }
-        
+    
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Error updating transaction: {str(e)}")
+        error_msg = str(e)
+        print(f"Error updating transaction: {error_msg}")
+        
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to update transaction: {str(e)}"
+            detail=f"Failed to update transaction: {error_msg}"
         )
 
 @router.get("/vendors/match")
@@ -522,4 +538,102 @@ async def match_vendor(
             status_code=500,
             detail=f"Failed to match vendor: {str(e)}"
         )
+
+@router.get("/categories")
+async def get_categories(current_user: dict = Depends(get_current_user)):
+    """
+    Get all available categories for the dropdown.
+    """
+    try:
+        supabase.postgrest.auth(current_user['access_token'])
+        response = supabase.table('categories').select('id, name').execute()
+        if not response.data:
+            return []
+        return response.data
+    except Exception as e:
+        print(f"Error fetching categories: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch categories: {str(e)}"
+        )
+
+@router.get("/debug-transaction-rls/{transaction_id}")
+async def debug_transaction_rls(
+    transaction_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Debug endpoint to check RLS policy for a specific transaction.
+    
+    This endpoint attempts a minimal update (same values) to test if RLS allows it.
+    """
+    try:
+        print(f"[DEBUG] Testing RLS for transaction {transaction_id}")
+        
+        # Set authentication token
+        supabase.postgrest.auth(current_user['access_token'])
+        
+        # Get current transaction data
+        response = supabase.table('transactions').select('*').eq('id', transaction_id).eq('user_id', current_user['id']).execute()
+        
+        if not response.data:
+            return {"error": "Transaction not found or access denied", "status": "failed"}
+        
+        current_transaction = response.data[0]
+        print(f"[DEBUG] Current transaction: {json.dumps(current_transaction, default=json_serial)}")
+        
+        # Create an update with exactly the same values (no changes)
+        # This should always succeed if RLS policy is configured correctly
+        debug_fields = {
+            'vendor_id': current_transaction.get('vendor_id'),
+            'date': current_transaction.get('date'),
+            'currency': current_transaction.get('currency'),
+            'category_id': current_transaction.get('category_id'),
+            'total_amount': current_transaction.get('total_amount'),
+            'raw_data': current_transaction.get('raw_data'),
+            'receipt_url': current_transaction.get('receipt_url'),
+            'created_at': current_transaction.get('created_at'),
+            'user_id': current_transaction.get('user_id')
+        }
+        
+        print(f"[DEBUG] Testing update with identical values: {json.dumps(debug_fields, default=json_serial)}")
+        
+        # Try the update
+        try:
+            debug_response = (
+                supabase.table('transactions')
+                .update(debug_fields)
+                .eq('id', transaction_id)
+                .execute()
+            )
+            
+            if debug_response.data:
+                return {
+                    "message": "RLS test passed! Policy allows updates.",
+                    "status": "success",
+                    "fields_allowed": list(debug_fields.keys())
+                }
+            else:
+                return {
+                    "message": "Update succeeded but returned no data.",
+                    "status": "warning"
+                }
+                
+        except Exception as e:
+            error_msg = str(e)
+            return {
+                "message": f"RLS test failed! Error: {error_msg}",
+                "status": "failed",
+                "error": error_msg,
+                "attempted_fields": list(debug_fields.keys())
+            }
+            
+    except Exception as e:
+        error_msg = str(e)
+        print(f"[DEBUG] Error in RLS test: {error_msg}")
+        
+        return {
+            "message": f"Debug operation failed: {error_msg}",
+            "status": "error"
+        }
 

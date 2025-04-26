@@ -137,32 +137,32 @@ def display_transaction_history():
     
     # Show transaction count
     st.write(f"Found {total_transactions} total transactions")
+
+    # Track which transaction is being edited
+    if 'editing_transaction_id' not in st.session_state:
+        st.session_state.editing_transaction_id = None
+    if 'editing_row_data' not in st.session_state:
+        st.session_state.editing_row_data = None
     
     if transactions:
         try:
             # Create DataFrame for display
             df = pd.DataFrame(transactions)
-            
             # Show raw data in expander for debugging
             with st.expander("Debug: Raw Transaction Data"):
                 st.json(transactions)
-            
             # Convert date strings to datetime for better display
             df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')
-            
             # Format currency and amount
             df['formatted_amount'] = df.apply(
                 lambda x: f"{x['currency']} {x['total_amount']:.2f}", 
                 axis=1
             )
-
             # Initialize session state for delete confirmation if not exists
             if 'delete_confirmation' not in st.session_state:
                 st.session_state.delete_confirmation = None
-            
             # Create columns for the table and action buttons
             col1, col2 = st.columns([10, 1])
-            
             with col1:
                 # Select and rename columns for display
                 display_df = df[[
@@ -176,84 +176,146 @@ def display_transaction_history():
                     'category_name': 'Category',
                     'date': 'Date'
                 })
-                
                 # Display the table
                 st.dataframe(
                     display_df,
                     hide_index=True,
                     use_container_width=True
                 )
-            
             with col2:
-                # Display delete buttons aligned with table rows
+                # Display delete and edit buttons aligned with table rows
                 for idx, row in df.iterrows():
                     delete_button = st.button("🗑️", key=f"delete_{row['id']}")
-                    
+                    edit_button = st.button("✏️ Edit", key=f"edit_{row['id']}")
                     if delete_button:
                         st.session_state.delete_confirmation = row['id']
-            
-            # Handle delete confirmation
+                    if edit_button:
+                        st.session_state.editing_transaction_id = row['id']
+                        st.session_state.editing_row_data = row
+            # Handle delete confirmation (unchanged)
             if st.session_state.delete_confirmation:
                 with st.container():
                     st.warning("Are you sure you want to delete this transaction?")
                     col3, col4 = st.columns([1, 1])
-                    
                     with col3:
                         if st.button("Yes, delete", key="confirm_delete"):
                             try:
-                                # Make API request to delete transaction
-                                headers = {
-                                    "Authorization": f"Bearer {st.session_state.access_token}"
-                                }
-                                
+                                headers = {"Authorization": f"Bearer {st.session_state.access_token}"}
                                 response = requests.delete(
                                     f"{API_URL}/remove-transaction",
                                     params={"transaction_id": st.session_state.delete_confirmation},
                                     headers=headers
                                 )
-                                
-                                if response.status_code in [200, 404]:  # Accept both success and not found
+                                if response.status_code in [200, 404]:
                                     result = response.json()
                                     st.success(result.get("message", "Transaction deleted successfully!"))
-                                    # Clear the confirmation state
                                     st.session_state.delete_confirmation = None
-                                    # Trigger transaction reload
                                     st.session_state.transaction_loading = True
+                                    load_transactions()
                                     st.rerun()
                                 else:
                                     st.error(f"Error: {response.status_code} - {response.text}")
                             except Exception as e:
                                 st.error(f"Failed to delete transaction: {str(e)}")
-                    
                     with col4:
                         if st.button("No, cancel", key="cancel_delete"):
                             st.session_state.delete_confirmation = None
                             st.rerun()
-            
-            # Pagination controls
+            # Edit form below the table
+            if st.session_state.editing_transaction_id:
+                row = st.session_state.editing_row_data
+                # Fetch categories for dropdown
+                try:
+                    headers = {"Authorization": f"Bearer {st.session_state.access_token}"}
+                    categories_response = requests.get(f"{API_URL}/categories", headers=headers)
+                    categories = categories_response.json() if categories_response.status_code == 200 else []
+                except Exception as e:
+                    categories = []
+                category_options = {cat['name']: cat['id'] for cat in categories}
+                current_category = row.get('category_name', '')
+                current_category_id = next((cat['id'] for cat in categories if cat['name'] == current_category), None)
+                st.markdown("---")
+                st.subheader("Edit Transaction")
+                with st.form("edit_transaction_form"):
+                    new_vendor = st.text_input("Vendor", value=row['vendor_name'] or '')
+                    new_date = st.date_input("Date", value=pd.to_datetime(row['date']))
+                    new_currency = st.text_input("Currency", value=row['currency'] or '')
+                    new_total = st.number_input("Total Amount", value=row['total_amount'])
+                    new_category = st.selectbox("Category", options=list(category_options.keys()), index=list(category_options.keys()).index(current_category) if current_category in category_options else 0)
+                    submitted = st.form_submit_button("Save Changes")
+                    cancelled = st.form_submit_button("Cancel")
+                    if submitted:
+                        # First get vendor_id if needed
+                        vendor_id = None
+                        if new_vendor:
+                            try:
+                                # Check for vendor match
+                                vendor_match_response = requests.get(
+                                    f"{API_URL}/vendors/match",
+                                    params={"vendor_name": new_vendor},
+                                    headers={"Authorization": f"Bearer {st.session_state.access_token}"}
+                                )
+                                
+                                if vendor_match_response.status_code == 200:
+                                    match_result = vendor_match_response.json()
+                                    if match_result.get("vendor_id"):
+                                        vendor_id = match_result["vendor_id"]
+                            except Exception as e:
+                                st.error(f"Error matching vendor: {str(e)}")
+                        
+                        # If no vendor_id found through match, use the original one
+                        if not vendor_id:
+                            vendor_id = row.get('vendor_id')
+                            
+                        # Build the update payload with only the needed fields
+                        update_data = {
+                            "vendor_id": vendor_id,
+                            "date": new_date.strftime("%Y-%m-%d"),
+                            "currency": new_currency,
+                            "total_amount": float(new_total),
+                            "category_id": category_options[new_category]
+                        }
+                        
+                        # Send the update request
+                        with st.spinner("Updating transaction..."):
+                            headers = {"Authorization": f"Bearer {st.session_state.access_token}"}
+                            response = requests.put(
+                                f"{API_URL}/update-transaction/{row['id']}",
+                                json=update_data,
+                                headers=headers
+                            )
+                            
+                            if response.status_code == 200:
+                                st.success("Transaction updated successfully!")
+                                st.session_state.editing_transaction_id = None
+                                st.session_state.transaction_loading = True
+                                load_transactions()
+                                st.rerun()
+                            else:
+                                st.error("Failed to update transaction. Please try again.")
+                    
+                    if cancelled:
+                        st.session_state.editing_transaction_id = None
+                        st.rerun()
+            # Pagination controls (unchanged)
             per_page = 10
             total_pages = max(1, (total_transactions + per_page - 1) // per_page)
             current_page = st.session_state.get('page_number', 1)
-            
             col1, col2, col3 = st.columns([1, 2, 1])
-            
             with col1:
                 if current_page > 1:
                     if st.button("← Previous"):
                         st.session_state.page_number = current_page - 1
                         st.session_state.transaction_loading = True
                         st.rerun()
-            
             with col2:
                 st.markdown(f"<div style='text-align: center'>Page {current_page} of {total_pages}</div>", unsafe_allow_html=True)
-            
             with col3:
                 if current_page < total_pages:
                     if st.button("Next →"):
                         st.session_state.page_number = current_page + 1
                         st.session_state.transaction_loading = True
                         st.rerun()
-        
         except Exception as e:
             st.error(f"Error displaying transactions: {str(e)}")
             st.write("Debug information:")
