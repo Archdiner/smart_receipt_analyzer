@@ -214,8 +214,8 @@ def display_transaction_history():
                     with st.container():
                         st.markdown("""
                         <div class="transaction-card editing-card">
-                            <div class="card-header">
-                                <span class="card-label">Edit Transaction</span>
+                            <div class="card-header" style="color: white;">
+                                <span class="card-label" style="color: white;">Edit Transaction</span>
                             </div>
                         </div>
                         """, unsafe_allow_html=True)
@@ -474,20 +474,67 @@ st.markdown("""
         }
         /* Editing card styles */
         .editing-card {
-            background-color: #f0f7ff;
+            background-color: #1e1e1e;
             border: 2px solid #2196f3;
             box-shadow: 0 4px 8px rgba(33, 150, 243, 0.2);
+            color: #ffffff;
         }
         .stForm {
-            background-color: #f0f7ff;
+            background-color: #1e1e1e;
             padding: 10px;
             border-radius: 10px;
+            color: #ffffff;
         }
         /* Make form buttons more visible */
         .stForm [data-testid="stFormSubmitButton"] button {
             background-color: #2196f3;
             color: white;
             font-weight: bold;
+        }
+        /* Style for form inputs with dark theme */
+        .stTextInput input, .stNumberInput input, .stDateInput input, .stSelectbox > div > div {
+            background-color: #2d2d2d !important;
+            color: #ffffff !important;
+            border-color: #444444 !important;
+        }
+        .stTextInput label, .stNumberInput label, .stDateInput label, .stSelectbox label {
+            color: #e0e0e0 !important;
+        }
+        /* Datepicker styling */
+        .stDateInput div[data-baseweb="calendar"] {
+            background-color: #2d2d2d !important;
+        }
+        .stDateInput button, .stSelectbox button {
+            background-color: #444444 !important;
+            color: #ffffff !important;
+        }
+        /* Dropdown for selectbox */
+        div[data-baseweb="select"] ul {
+            background-color: #2d2d2d !important;
+        }
+        div[data-baseweb="select"] li {
+            color: #ffffff !important;
+        }
+        div[data-baseweb="select"] li:hover {
+            background-color: #444444 !important;
+        }
+        /* Manual entry form dark container */
+        .dark-form-container {
+            background-color: #1e1e1e;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            color: #ffffff;
+        }
+        .dark-form-container h4 {
+            color: #e0e0e0 !important;
+            margin-top: 10px;
+            margin-bottom: 10px;
+            font-weight: 500;
+        }
+        /* Override markdown text color in dark forms */
+        .dark-form-container p, .dark-form-container .markdown-text-container {
+            color: #e0e0e0 !important;
         }
     </style>
 """, unsafe_allow_html=True)
@@ -586,6 +633,9 @@ def main_app():
 
         if mode == "Manual Entry":
             st.markdown("### Manual Transaction Entry")
+            
+            # Create a container with dark theme styling
+            st.markdown('<div class="dark-form-container">', unsafe_allow_html=True)
             
             # Create a form for manual entry
             with st.form("manual_transaction_form"):
@@ -693,6 +743,9 @@ def main_app():
                                 
                         except Exception as e:
                             st.error(f"Failed to save transaction: {str(e)}")
+            
+            # Close the container div
+            st.markdown('</div>', unsafe_allow_html=True)
         else:
             # File uploader for image-based analysis
             uploaded_file = st.file_uploader("Choose an image file", type=["jpg", "jpeg", "png"])
