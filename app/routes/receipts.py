@@ -7,7 +7,7 @@ from app.routes.auth import get_current_user
 from app.services.supabase_client import supabase
 import logging
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 

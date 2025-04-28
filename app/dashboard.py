@@ -4,9 +4,10 @@ from PIL import Image
 import io
 import json
 import base64
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
 import pandas as pd
+import matplotlib.pyplot as plt
 
 # API Configuration
 API_URL = "http://localhost:8000/api"
@@ -618,8 +619,8 @@ def main_app():
         st.session_state.transaction_error = None
         st.session_state.page_number = 1
     
-    # Create tabs for analysis and history
-    tab1, tab2 = st.tabs(["Receipt Analysis", "Transaction History"])
+    # Create tabs for analysis, history, and visualization
+    tab1, tab2, tab3 = st.tabs(["Receipt Analysis", "Transaction History", "Data Visualization"])
     
     with tab1:
         st.markdown("Upload a receipt image or SMS message for analysis")
@@ -839,6 +840,549 @@ def main_app():
     
     with tab2:
         display_transaction_history()
+    
+    with tab3:
+        display_data_visualization()
+
+def load_visualization_data(time_period, start_date=None, end_date=None):
+    """Load transaction data for visualizations using the existing transactions API"""
+    try:
+        # Calculate date range based on time_period
+        today = datetime.now().date()
+        
+        if time_period == "today":
+            filter_start_date = today
+            filter_end_date = today
+        elif time_period == "this_week":
+            # Start from the beginning of current week (Monday)
+            filter_start_date = today - timedelta(days=today.weekday())
+            filter_end_date = today
+        elif time_period == "this_month":
+            # Start from the beginning of current month
+            filter_start_date = today.replace(day=1)
+            filter_end_date = today
+        elif time_period == "this_year":
+            # Start from the beginning of current year
+            filter_start_date = today.replace(month=1, day=1)
+            filter_end_date = today
+        elif time_period == "custom":
+            # Use provided dates
+            filter_start_date = start_date if start_date else today - timedelta(days=30)
+            filter_end_date = end_date if end_date else today
+        else:
+            # Default to last 30 days
+            filter_start_date = today - timedelta(days=30)
+            filter_end_date = today
+        
+        # Get all transactions from session state or load if needed
+        if not st.session_state.transaction_data or st.session_state.transaction_loading:
+            with st.spinner("Loading transaction data..."):
+                load_transactions()
+                
+        # Process transactions from existing data
+        all_transactions = []
+        if st.session_state.transaction_data and 'transactions' in st.session_state.transaction_data:
+            all_transactions = st.session_state.transaction_data['transactions']
+        
+        # Convert to DataFrame for easier filtering and processing
+        if all_transactions:
+            # Convert to DataFrame
+            transactions_df = pd.DataFrame(all_transactions)
+            
+            # Ensure date column is datetime
+            transactions_df['date'] = pd.to_datetime(transactions_df['date'])
+            
+            # Filter by date range
+            filtered_df = transactions_df[
+                (transactions_df['date'].dt.date >= filter_start_date) & 
+                (transactions_df['date'].dt.date <= filter_end_date)
+            ]
+            
+            # Calculate summary metrics
+            total_spent = filtered_df['total_amount'].sum()
+            transaction_count = len(filtered_df)
+            avg_transaction = total_spent / transaction_count if transaction_count > 0 else 0
+            
+            # Get previous period data for comparison
+            period_length = (filter_end_date - filter_start_date).days + 1
+            prev_end_date = filter_start_date - timedelta(days=1)
+            prev_start_date = filter_start_date - timedelta(days=period_length)
+            
+            prev_period_df = transactions_df[
+                (transactions_df['date'].dt.date >= prev_start_date) & 
+                (transactions_df['date'].dt.date <= prev_end_date)
+            ]
+            
+            prev_total = prev_period_df['total_amount'].sum()
+            change_percentage = ((total_spent - prev_total) / prev_total * 100) if prev_total > 0 else 0
+            
+            # Get most common currency
+            most_common_currency = filtered_df['currency'].mode().iloc[0] if not filtered_df.empty else 'BHD'
+            
+            # Process category breakdown
+            categories_df = filtered_df.groupby('category_name').agg({
+                'total_amount': 'sum',
+                'id': 'count'
+            }).reset_index()
+            
+            categories_df.rename(columns={'id': 'transaction_count'}, inplace=True)
+            
+            # Calculate percentages
+            categories_df['percentage'] = categories_df['total_amount'] / total_spent * 100 if total_spent > 0 else 0
+            
+            # Process time series data
+            time_series = []
+            for date, group in filtered_df.groupby(filtered_df['date'].dt.date):
+                for category, cat_group in group.groupby('category_name'):
+                    time_series.append({
+                        'date': date,
+                        'category_name': category,
+                        'total_amount': cat_group['total_amount'].sum()
+                    })
+            
+            time_series_df = pd.DataFrame(time_series)
+            
+            # Process vendor data
+            vendors_df = filtered_df.groupby('vendor_name').agg({
+                'total_amount': 'sum',
+                'id': 'count'
+            }).reset_index()
+            
+            vendors_df.rename(columns={'id': 'transaction_count'}, inplace=True)
+            vendors_df = vendors_df.sort_values('total_amount', ascending=False).head(10)
+            
+            # Build final response
+            dashboard_data = {
+                'summary': {
+                    'total_spent': total_spent,
+                    'transaction_count': transaction_count,
+                    'average_transaction': avg_transaction,
+                    'currency': most_common_currency,
+                    'change_percentage': change_percentage
+                },
+                'categories_df': categories_df,
+                'time_series_df': time_series_df,
+                'vendors_df': vendors_df,
+                'filtered_transactions': filtered_df
+            }
+            
+            return dashboard_data
+        else:
+            return None
+                
+    except Exception as e:
+        st.error(f"Error processing visualization data: {str(e)}")
+        return None
+
+def display_data_visualization():
+    """Display data visualization dashboard with various charts and filters"""
+    st.markdown("### Spending Insights & Analytics")
+    
+    # Time period selection
+    col1, col2 = st.columns([3, 2])
+    
+    with col1:
+        time_period = st.radio(
+            "Select Time Period",
+            ["Today", "This Week", "This Month", "This Year", "Custom Range"],
+            horizontal=True,
+            key="viz_time_period"
+        )
+    
+    # Show date pickers if custom range is selected
+    start_date = None
+    end_date = None
+    
+    if time_period == "Custom Range":
+        with col2:
+            col2a, col2b = st.columns(2)
+            with col2a:
+                start_date = st.date_input("Start Date", 
+                                          value=datetime.now().date() - timedelta(days=30),
+                                          key="viz_start_date")
+            with col2b:
+                end_date = st.date_input("End Date", 
+                                        value=datetime.now().date(),
+                                        key="viz_end_date")
+    
+    # Map UI selection to API parameter
+    time_period_param = time_period.lower().replace(" ", "_")
+    
+    # Load data
+    dashboard_data = load_visualization_data(time_period_param, start_date, end_date)
+    
+    if not dashboard_data:
+        st.warning("No data available for the selected time period. Try uploading some receipts or changing the date range.")
+        return
+    
+    # Format summary data
+    summary = dashboard_data.get('summary', {})
+    categories_df = dashboard_data.get('categories_df', pd.DataFrame())
+    time_series_df = dashboard_data.get('time_series_df', pd.DataFrame())
+    vendors_df = dashboard_data.get('vendors_df', pd.DataFrame())
+    
+    # Display summary KPI cards
+    display_kpi_metrics(summary)
+    
+    # Main visualization area
+    st.markdown("---")
+    
+    # Create tabs for different visualization types
+    viz_tab1, viz_tab2, viz_tab3, viz_tab4 = st.tabs([
+        "Spending by Category", 
+        "Spending Over Time", 
+        "Top Vendors",
+        "Custom Analysis"
+    ])
+    
+    with viz_tab1:
+        display_category_charts(categories_df, summary.get('currency', 'BHD'))
+        
+    with viz_tab2:
+        display_time_series_charts(time_series_df, summary.get('currency', 'BHD'))
+        
+    with viz_tab3:
+        display_vendor_charts(vendors_df, summary.get('currency', 'BHD'))
+        
+    with viz_tab4:
+        display_custom_analysis(categories_df, time_series_df, vendors_df, summary.get('currency', 'BHD'))
+
+def display_kpi_metrics(summary):
+    """Display summary KPI metrics in cards"""
+    currency = summary.get('currency', 'BHD')
+    total_spent = summary.get('total_spent', 0)
+    transaction_count = summary.get('transaction_count', 0)
+    avg_transaction = summary.get('average_transaction', 0)
+    change_percentage = summary.get('change_percentage', 0)
+    
+    # Create metrics row
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric(
+            label="Total Spent",
+            value=f"{currency} {total_spent:.2f}",
+            delta=f"{change_percentage:.1f}% vs previous period",
+            delta_color="inverse"  # Negative is good for spending
+        )
+        
+    with col2:
+        st.metric(
+            label="Transactions",
+            value=f"{transaction_count}"
+        )
+        
+    with col3:
+        st.metric(
+            label="Average Transaction",
+            value=f"{currency} {avg_transaction:.2f}"
+        )
+
+def display_category_charts(categories_df, currency):
+    """Display category-based visualizations"""
+    if categories_df.empty:
+        st.info("No category data available for the selected period.")
+        return
+    
+    st.subheader("Spending by Category")
+    
+    # Create column layout
+    col1, col2 = st.columns([3, 2])
+    
+    with col1:
+        # Choose chart type
+        chart_type = st.radio(
+            "Chart Type",
+            ["Pie Chart", "Bar Chart"],
+            horizontal=True,
+            key="category_chart_type"
+        )
+        
+        # Display chart based on selection
+        if chart_type == "Pie Chart":
+            # Streamlit native pie chart
+            fig = plt.figure(figsize=(10, 6))
+            plt.pie(
+                categories_df['total_amount'],
+                labels=categories_df['category_name'],
+                autopct='%1.1f%%',
+                startangle=90
+            )
+            plt.axis('equal')
+            st.pyplot(fig)
+        else:
+            # Streamlit native bar chart
+            chart_data = categories_df.sort_values('total_amount', ascending=True)
+            chart = st.bar_chart(
+                data=chart_data.set_index('category_name')['total_amount'],
+                use_container_width=True
+            )
+    
+    with col2:
+        # Top categories table
+        st.markdown("#### Top Categories")
+        
+        # Format table data
+        table_data = categories_df.copy()
+        table_data['total_amount'] = table_data['total_amount'].apply(lambda x: f"{currency} {x:.2f}")
+        table_data['percentage'] = table_data['percentage'].apply(lambda x: f"{x:.1f}%")
+        
+        # Rename columns for display
+        table_data = table_data.rename(columns={
+            'category_name': 'Category',
+            'total_amount': 'Amount',
+            'transaction_count': 'Transactions',
+            'percentage': 'Percentage'
+        })
+        
+        # Display streamlit table
+        st.dataframe(
+            table_data[['Category', 'Amount', 'Percentage', 'Transactions']],
+            use_container_width=True,
+            hide_index=True
+        )
+
+def display_time_series_charts(time_series_df, currency):
+    """Display time-based visualizations"""
+    if time_series_df.empty:
+        st.info("No time series data available for the selected period.")
+        return
+    
+    st.subheader("Spending Over Time")
+    
+    # Ensure date is in datetime format
+    if 'date' in time_series_df.columns:
+        time_series_df['date'] = pd.to_datetime(time_series_df['date'])
+    
+    # Category selection
+    if 'category_name' in time_series_df.columns:
+        all_categories = time_series_df['category_name'].unique()
+        
+        # Default to top 3 categories
+        default_categories = list(time_series_df.groupby('category_name')['total_amount'].sum().sort_values(ascending=False).head(3).index)
+        
+        selected_categories = st.multiselect(
+            "Select Categories to Display",
+            options=all_categories,
+            default=default_categories,
+            key="time_series_categories"
+        )
+        
+        # Filter by selected categories
+        if selected_categories:
+            filtered_df = time_series_df[time_series_df['category_name'].isin(selected_categories)]
+        else:
+            filtered_df = time_series_df
+            
+        # Prepare data for line chart
+        pivot_df = filtered_df.pivot_table(
+            index='date',
+            columns='category_name',
+            values='total_amount',
+            aggfunc='sum'
+        ).fillna(0)
+        
+        # Streamlit line chart
+        st.line_chart(pivot_df)
+        
+        # Show daily totals
+        st.subheader("Daily Spending Totals")
+        
+        # Aggregate by date
+        daily_totals = filtered_df.groupby('date')['total_amount'].sum().reset_index()
+        daily_totals = daily_totals.set_index('date')
+        
+        # Streamlit area chart
+        st.area_chart(daily_totals)
+
+def display_vendor_charts(vendors_df, currency):
+    """Display vendor-based visualizations"""
+    if vendors_df.empty:
+        st.info("No vendor data available for the selected period.")
+        return
+    
+    st.subheader("Top Vendors by Spending")
+    
+    # Format data
+    vendors_df = vendors_df.sort_values('total_amount', ascending=True).tail(10)
+    
+    # Streamlit horizontal bar chart
+    chart = st.bar_chart(
+        data=vendors_df.set_index('vendor_name')['total_amount'],
+        use_container_width=True
+    )
+    
+    # Display as table too
+    st.markdown("#### Vendor Details")
+    
+    # Format table data
+    table_data = vendors_df.copy()
+    table_data['total_amount'] = table_data['total_amount'].apply(lambda x: f"{currency} {x:.2f}")
+    table_data['avg_transaction'] = table_data['total_amount'].astype(str) + " / " + table_data['transaction_count'].astype(str) + " items"
+    
+    # Rename columns for display
+    table_data = table_data.rename(columns={
+        'vendor_name': 'Vendor',
+        'total_amount': 'Amount',
+        'transaction_count': 'Transactions'
+    })
+    
+    # Display streamlit table
+    st.dataframe(
+        table_data[['Vendor', 'Amount', 'Transactions']],
+        use_container_width=True,
+        hide_index=True
+    )
+
+def display_custom_analysis(categories_df, time_series_df, vendors_df, currency):
+    """Allow user to create custom visualizations"""
+    st.subheader("Custom Data Analysis")
+    
+    # Choose what to analyze
+    analysis_type = st.selectbox(
+        "Select Analysis Type",
+        ["Category Comparison", "Time Trends", "Vendor Analysis"]
+    )
+    
+    if analysis_type == "Category Comparison" and not categories_df.empty:
+        # Choose visualization type
+        viz_type = st.radio(
+            "Visualization Type",
+            ["Bar Chart", "Pie Chart", "Donut Chart"],
+            horizontal=True
+        )
+        
+        # Value to display
+        value_type = st.radio(
+            "Value to Display",
+            ["Total Amount", "Transaction Count", "Average Transaction"],
+            horizontal=True
+        )
+        
+        # Prepare data based on selection
+        if value_type == "Total Amount":
+            values = categories_df['total_amount']
+            value_label = f"Amount ({currency})"
+        elif value_type == "Transaction Count":
+            values = categories_df['transaction_count']
+            value_label = "Number of Transactions"
+        else:
+            # Calculate average
+            categories_df['avg_transaction'] = categories_df['total_amount'] / categories_df['transaction_count']
+            values = categories_df['avg_transaction']
+            value_label = f"Average Amount ({currency})"
+        
+        # Create visualization
+        fig = plt.figure(figsize=(10, 6))
+        
+        if viz_type == "Bar Chart":
+            plt.bar(categories_df['category_name'], values)
+            plt.xticks(rotation=45, ha='right')
+            plt.xlabel("Category")
+            plt.ylabel(value_label)
+            
+        elif viz_type == "Pie Chart":
+            plt.pie(values, labels=categories_df['category_name'], autopct='%1.1f%%', startangle=90)
+            plt.axis('equal')
+            
+        elif viz_type == "Donut Chart":
+            # Create a circle at the center to make it a donut chart
+            circle = plt.Circle((0, 0), 0.7, fc='white')
+            plt.pie(values, labels=categories_df['category_name'], autopct='%1.1f%%', startangle=90)
+            plt.axis('equal')
+            fig.gca().add_artist(circle)
+        
+        st.pyplot(fig)
+        
+    elif analysis_type == "Time Trends" and not time_series_df.empty:
+        # Ensure date is in datetime format
+        if 'date' in time_series_df.columns:
+            time_series_df['date'] = pd.to_datetime(time_series_df['date'])
+        
+        # Choose time grouping
+        time_grouping = st.radio(
+            "Group By",
+            ["Day", "Week", "Month"],
+            horizontal=True
+        )
+        
+        # Apply grouping
+        if time_grouping == "Day":
+            grouped_df = time_series_df.copy()
+            group_key = 'date'
+        elif time_grouping == "Week":
+            time_series_df['week'] = time_series_df['date'].dt.isocalendar().week
+            time_series_df['week_label'] = time_series_df['date'].dt.strftime('Week %U')
+            grouped_df = time_series_df.groupby(['week_label', 'category_name'])['total_amount'].sum().reset_index()
+            group_key = 'week_label'
+        else:  # Month
+            time_series_df['month'] = time_series_df['date'].dt.strftime('%Y-%m')
+            grouped_df = time_series_df.groupby(['month', 'category_name'])['total_amount'].sum().reset_index()
+            group_key = 'month'
+        
+        # Visualization type
+        chart_type = st.radio(
+            "Chart Type",
+            ["Line Chart", "Bar Chart", "Area Chart"],
+            horizontal=True
+        )
+        
+        # Prepare data
+        if group_key != 'date':
+            pivot_df = grouped_df.pivot_table(
+                index=group_key,
+                columns='category_name',
+                values='total_amount',
+                aggfunc='sum'
+            ).fillna(0)
+        else:
+            pivot_df = grouped_df.pivot_table(
+                index='date',
+                columns='category_name',
+                values='total_amount',
+                aggfunc='sum'
+            ).fillna(0)
+        
+        # Create chart
+        if chart_type == "Line Chart":
+            st.line_chart(pivot_df)
+        elif chart_type == "Bar Chart":
+            st.bar_chart(pivot_df)
+        else:  # Area Chart
+            st.area_chart(pivot_df)
+            
+    elif analysis_type == "Vendor Analysis" and not vendors_df.empty:
+        # Choose top N vendors
+        top_n = st.slider("Number of Vendors to Display", 3, 10, 5)
+        
+        # Sort and filter data
+        top_vendors = vendors_df.sort_values('total_amount', ascending=False).head(top_n)
+        
+        # Chart type
+        chart_type = st.radio(
+            "Chart Type",
+            ["Bar Chart", "Pie Chart"],
+            horizontal=True
+        )
+        
+        # Create visualization
+        if chart_type == "Bar Chart":
+            st.bar_chart(
+                data=top_vendors.set_index('vendor_name')['total_amount'],
+                use_container_width=True
+            )
+        else:  # Pie Chart
+            fig = plt.figure(figsize=(10, 6))
+            plt.pie(
+                top_vendors['total_amount'],
+                labels=top_vendors['vendor_name'],
+                autopct='%1.1f%%',
+                startangle=90
+            )
+            plt.axis('equal')
+            st.pyplot(fig)
+    else:
+        st.info("No data available for the selected analysis type.")
 
 # Main flow control
 if not st.session_state.logged_in:
