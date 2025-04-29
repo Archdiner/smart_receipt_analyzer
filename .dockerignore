@@ -1,0 +1,69 @@
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+README.md
+TODO.md
+*.md
+docs/
+
+# Development files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Frontend files (if any)
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Test files
+tests/
+test/
+pytest.ini
+.coverage
+htmlcov/
+
+# Logs
+*.log
+logs/
+
+# Local development
+docker-compose.yml
+Dockerfile
+.dockerignore
+
+# Streamlit dashboard (since it's a separate application)
+dashboard.py 
