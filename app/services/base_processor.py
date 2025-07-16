@@ -18,7 +18,7 @@ client = OpenAI(
 # Initialize PaddleOCR
 ocr = PaddleOCR(use_angle_cls=True, lang='en')
 
-# Common sectors for both processors
+# Common sectors for both processors - SINGLE SOURCE OF TRUTH
 SECTORS = [
     "Groceries & Household Supplies",
     "Dining & Cafés",
@@ -68,9 +68,13 @@ class BaseProcessor:
         
         return "\n".join(extracted_text)
     
+    def get_sectors_string(self) -> str:
+        """Get sectors as a formatted string for prompts."""
+        return '", "'.join(SECTORS)
+    
     def create_processing_prompt(self, extracted_text: str, prompt_type: str) -> str:
         """Create a prompt for the AI based on the type of document."""
-        sectors_str = '", "'.join(SECTORS)
+        sectors_str = self.get_sectors_string()
         
         if prompt_type == "receipt":
             return f"""
@@ -231,10 +235,4 @@ Do not include any text outside the JSON. Use ONLY information found in the prov
                     
         except Exception as e:
             print(f"\nGeneral Error: {str(e)}")
-            raise ValueError(f"Failed to process document: {str(e)}")
-    
-    def json_serial(self, obj):
-        """JSON serializer for objects not serializable by default json code"""
-        if isinstance(obj, datetime):
-            return obj.isoformat()
-        raise TypeError(f"Type {type(obj)} not serializable") 
+            raise ValueError(f"Failed to process document: {str(e)}") 

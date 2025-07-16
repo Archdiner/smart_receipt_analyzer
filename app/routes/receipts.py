@@ -5,17 +5,14 @@ from app.services.transaction_processor import process_transaction_screenshot
 from app.services.database_service import DatabaseService
 from app.routes.auth import get_current_user
 from app.services.supabase_client import supabase
+from app.services.utils import json_serial, format_json_for_logging
 import logging
 import json
 from datetime import datetime, timedelta
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
-def json_serial(obj):
-    """JSON serializer for objects not serializable by default json code"""
-    if isinstance(obj, datetime):
-        return obj.isoformat()
-    raise TypeError(f"Type {type(obj)} not serializable")
+# json_serial function is now imported from utils.py - no duplicate definition needed
 
 router = APIRouter()
 db_service = DatabaseService()
@@ -47,7 +44,7 @@ async def analyze_expense_route(
         
         # Process the receipt using AI
         processed_data = ocr_llm_process_receipt(image_data)
-        logging.info(f"Processed receipt data: {json.dumps(processed_data, default=json_serial, indent=2)}")
+        logging.info(f"Processed receipt data: {format_json_for_logging(processed_data)}")
         
         # Store the transaction in database
         if processed_data and 'parsed_data' in processed_data:
@@ -59,7 +56,7 @@ async def analyze_expense_route(
                 )
                 # Add the database ID to the response
                 processed_data['transaction_id'] = stored_transaction['id']
-                logging.info(f"Successfully stored transaction: {json.dumps(stored_transaction, default=json_serial, indent=2)}")
+                logging.info(f"Successfully stored transaction: {format_json_for_logging(stored_transaction)}")
             except ValueError as ve:
                 if "Profile not found" in str(ve):
                     logging.error(f"Profile not found error: {str(ve)}")
@@ -107,7 +104,7 @@ async def analyze_transaction_route(
         
         # Process the transaction screenshot
         processed_data = process_transaction_screenshot(image_data)
-        print(f"Processed transaction data: {json.dumps(processed_data, default=json_serial, indent=2)}")
+        print(f"Processed transaction data: {format_json_for_logging(processed_data)}")
         
         # Store the transaction(s) in database
         if processed_data and 'parsed_data' in processed_data:
@@ -121,7 +118,7 @@ async def analyze_transaction_route(
                 if 'transaction_type' not in transaction_data:
                     transaction_data['transaction_type'] = 'sms'
                 
-                print(f"Storing transaction data: {json.dumps(transaction_data, default=json_serial, indent=2)}")
+                print(f"Storing transaction data: {format_json_for_logging(transaction_data)}")
                 
                 stored_transaction = await db_service.store_transaction(
                     user_id=current_user['id'],
@@ -130,7 +127,7 @@ async def analyze_transaction_route(
                 )
                 # Add the database ID to the response
                 processed_data['transaction_id'] = stored_transaction['id']
-                print(f"Successfully stored transaction: {json.dumps(stored_transaction, default=json_serial, indent=2)}")
+                print(f"Successfully stored transaction: {format_json_for_logging(stored_transaction)}")
             except ValueError as ve:
                 if "Profile not found" in str(ve):
                     print(f"Profile not found error: {str(ve)}")
@@ -472,7 +469,7 @@ async def update_transaction(
         )
         
         if update_response.data:
-            print(f"Update successful: {json.dumps(update_response.data[0], default=json_serial)}")
+            print(f"Update successful: {format_json_for_logging(update_response.data[0])}")
             return {
                 "message": "Transaction updated successfully",
                 "transaction": update_response.data[0]
@@ -580,7 +577,7 @@ async def debug_transaction_rls(
             return {"error": "Transaction not found or access denied", "status": "failed"}
         
         current_transaction = response.data[0]
-        print(f"[DEBUG] Current transaction: {json.dumps(current_transaction, default=json_serial)}")
+        print(f"[DEBUG] Current transaction: {format_json_for_logging(current_transaction)}")
         
         # Create an update with exactly the same values (no changes)
         # This should always succeed if RLS policy is configured correctly
@@ -596,7 +593,7 @@ async def debug_transaction_rls(
             'user_id': current_transaction.get('user_id')
         }
         
-        print(f"[DEBUG] Testing update with identical values: {json.dumps(debug_fields, default=json_serial)}")
+        print(f"[DEBUG] Testing update with identical values: {format_json_for_logging(debug_fields)}")
         
         # Try the update
         try:

@@ -8,6 +8,7 @@ from datetime import datetime
 import json
 import logging
 from .supabase_client import supabase
+from .utils import json_serial, format_json_for_logging
 
 # Initialize OpenAI client
 openai_client = OpenAI(
@@ -15,11 +16,7 @@ openai_client = OpenAI(
     base_url="https://api.openai.com/v1"
 )
 
-def json_serial(obj):
-    """JSON serializer for objects not serializable by default json code"""
-    if isinstance(obj, datetime):
-        return obj.isoformat()
-    raise TypeError(f"Type {type(obj)} not serializable")
+# json_serial function is now imported from utils.py - no duplicate definition needed
 
 class VendorMatcher:
     def __init__(self):
@@ -294,7 +291,7 @@ class DatabaseService:
                 'date': transaction_data['date'],
                 'currency': transaction_data['currency'],
                 'total_amount': float(transaction_data['total']),  # Ensure numeric
-                'raw_data': json.dumps(transaction_data, default=json_serial),  # Store only the parsed data
+                'raw_data': format_json_for_logging(transaction_data),  # Store only the parsed data
                 'receipt_url': None,  # Will be updated later when cloud storage is implemented
                 'created_at': datetime.utcnow().isoformat()
             }
